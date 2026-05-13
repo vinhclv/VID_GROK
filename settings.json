@@ -1,0 +1,56 @@
+{
+    "system": {
+        "max_threads": 1,
+        "loop_limit": 2,
+        "max_retries": 10,
+        "wait_time": 90,
+        "aspect_ratio": "9:16",
+        "resolution": "480p"
+    },
+    "urls": {
+        "gemini_url": "https://gemini.google.com",
+        "videofx_url": "https://labs.google/fx/tools/video-fx"
+    },
+    "projects": [
+        {
+            "name": "test",
+            "path": "//192.168.1.17/data share/Dat/init"
+        }
+    ],
+    "gems": [
+        {
+            "name": "grok",
+            "url": "https://grok.com/imagine",
+            "description": "Mô tả..."
+        }
+    ],
+    "standardize": {
+        "api_key": "YOUR_API_KEY_HERE",
+        "languages": [
+            {
+                "name": "Anh",
+                "code": "en"
+            },
+            {
+                "name": "Hàn",
+                "code": "ko"
+            },
+            {
+                "name": "Trung",
+                "code": "zh"
+            },
+            {
+                "name": "Nhật",
+                "code": "ja"
+            },
+            {
+                "name": "Việt",
+                "code": "vi"
+            },
+            {
+                "name": "Pháp",
+                "code": "fr"
+            }
+        ]
+    }
+}
