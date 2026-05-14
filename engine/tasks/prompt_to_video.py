@@ -217,8 +217,8 @@ async def process_1_image_video_batch(page: Page, file_batch: list, output_folde
         try:
             if idx > 0:
                 try:
-                    # Hỗ trợ đa ngôn ngữ: Tìm nút Đã lưu (VN) hoặc Saved (EN) hoặc ảnh đại diện của nút
-                    btn_saved = page.locator("button[aria-label='Đã lưu'], button[aria-label='Saved'], a[href='/imagine/saved'], button:has(img[alt='Most recent favorite'])").first
+                    # Dùng XPath tuyệt đối theo chuẩn của user để click nút Saved/New
+                    btn_saved = page.locator("xpath=/html/body/div[2]/div/div[2]/div/div/div/div[2]/div/form/div/button").first
                     if await btn_saved.is_visible(timeout=3000):
                         await human_click(btn_saved, page)
                         log_callback(f'➡️ Đã click nút Đã lưu (Saved) để chuyển context (STT {stt})')
