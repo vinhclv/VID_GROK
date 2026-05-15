@@ -1,10 +1,10 @@
 {
     "system": {
-        "max_threads": 1,
-        "loop_limit": 2,
+        "max_threads": 2,
+        "loop_limit": 4,
         "max_retries": 10,
-        "wait_time": 90,
-        "aspect_ratio": "9:16",
+        "wait_time": 100,
+        "aspect_ratio": "16:9",
         "resolution": "480p"
     },
     "urls": {

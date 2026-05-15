@@ -5,7 +5,7 @@ import shutil
 import threading
 import time
 
-from engine.browser import init_driver_from_profile
+from engine.browser  import init_driver_from_profile
 
 class ProfileManagerTab(ttk.Frame):
     def __init__(self, parent, profiles_dir):

@@ -2,7 +2,6 @@ import os
 import threading
 import shutil # <--- [MỚI] Cần import cái này để xóa folder rác
 import undetected_chromedriver as uc
-import random 
 import json
 
 from config import ORBITA_PATH, DRIVER_PATH

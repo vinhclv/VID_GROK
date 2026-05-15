@@ -121,6 +121,17 @@ async def setup_video_format_ui(page: Page):
     Tự động đọc cấu hình Aspect Ratio (Tỉ lệ) và Resolution (Độ phân giải) 
     từ file settings.json (nằm trong config.global_settings['system'])
     """
+    # 0. Chuyển sang tab Video
+    try:
+        # Tìm chính xác nút có text là 'Video'
+        btn_video = page.locator("button:text-is('Video'), button:has-text('Video')").first
+        if await btn_video.is_visible(timeout=2000):
+            await human_click(btn_video, page)
+            print(f'✅ Đã click chuyển sang tab Video')
+            await page.wait_for_timeout(1000)
+    except Exception as e:
+        pass
+
     system_cfg = config.global_settings.get('system', {})
     aspect_ratio = system_cfg.get('aspect_ratio', '16:9') # Mặc định 16:9
     resolution = system_cfg.get('resolution', '720p')     # Mặc định 720p
@@ -188,6 +199,18 @@ async def process_1_image_video_batch(page: Page, file_batch: list, output_folde
                 pass
         page.on("response", on_response)
     
+    try:
+        # Tìm chính xác nút Saved bằng aria-label hoặc text (không sợ nhầm sang nút + Upload ảnh)
+        btn_saved = page.locator("button[aria-label='Saved'], button:has-text('Saved')").first
+        if await btn_saved.is_visible(timeout=3000):
+            await human_click(btn_saved, page)
+            log_callback(f'➡️ Đã click nút Đã lưu (Saved) để dọn context trước khi chạy')
+        else:
+            log_callback(f'⚠️ Không tìm thấy nút Saved trên UI lúc bắt đầu.')
+    except Exception as e:
+        log_callback(f'⚠️ Lỗi chuyển context lúc bắt đầu: {e}')
+        await page.wait_for_timeout(random.uniform(2000, 3000))
+
     for idx, item in enumerate(file_batch):
         stt = str(item.get('STT', '')).strip()
         if not stt:
@@ -217,8 +240,9 @@ async def process_1_image_video_batch(page: Page, file_batch: list, output_folde
         try:
             if idx > 0:
                 try:
-                    # Dùng XPath tuyệt đối theo chuẩn của user để click nút Saved/New
-                    btn_saved = page.locator("xpath=/html/body/div[2]/div/div[2]/div/div/div/div[2]/div/form/div/button").first
+                    await page.wait_for_timeout(random.uniform(2000, 3000))
+                    # Tìm chính xác nút Saved bằng aria-label hoặc text (không sợ nhầm sang nút + Upload ảnh)
+                    btn_saved = page.locator("button[aria-label='Saved'], button:has-text('Saved')").first
                     if await btn_saved.is_visible(timeout=3000):
                         await human_click(btn_saved, page)
                         log_callback(f'➡️ Đã click nút Đã lưu (Saved) để chuyển context (STT {stt})')
@@ -234,7 +258,7 @@ async def process_1_image_video_batch(page: Page, file_batch: list, output_folde
             textbox = page.locator("form textarea, form [contenteditable='true'], [role='textbox']").first
             await textbox.wait_for(state='visible', timeout=15000)
             
-            # Click cấu hình thời lượng và định dạng video
+            # Click cấu hình thời lượng và định dạng video (Đã bao gồm click tab Video bên trong)
             await setup_video_duration_ui(page, video_length)
             await setup_video_format_ui(page)
             
