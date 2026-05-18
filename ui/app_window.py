@@ -156,6 +156,7 @@ class BatchApp:
         self.log_area.tag_config("SUCCESS", foreground="#6cc644")
         self.log_area.tag_config("ERROR", foreground="#ff5555")
         self.log_area.tag_config("WARNING", foreground="#ffb86c")
+        self.log_area.tag_config("TECH", foreground="#00d4ff")
 
     def log(self, message, tag="INFO"):
         ts = datetime.now().strftime("%H:%M:%S")

@@ -102,6 +102,44 @@ class BatchProcessor:
             time.sleep(3)
         
         self.current_monitoring_info = None
+        
+        # Sau khi kết thúc, kiểm tra xem còn STT nào thiếu không và log ra
+        try:
+            match loop_type:
+                case "srt_prompt":
+                    final_pending, _ = get_srt_prompt_status(inp, out)
+                case "prompt_image":
+                    final_pending, _ = get_prompt_image_status(inp, out)
+                case "1_image_prompt_video":
+                    final_pending, _ = get_1_image_prompt_video_status(inp, inp2, out)
+                case "stretch_video":
+                    final_pending, _ = get_stretch_video_status(inp, inp2, out)
+                case _:
+                    final_pending = []
+
+            if final_pending:
+                # Gộp các số liên tiếp thành dải (1,2,3,5 -> '1-3, 5')
+                nums = sorted([int(p.get('STT', 0)) for p in final_pending if str(p.get('STT', '')).isdigit()])
+                ranges, start, end = [], nums[0], nums[0]
+                for n in nums[1:]:
+                    if n == end + 1:
+                        end = n
+                    else:
+                        ranges.append(str(start) if start == end else f"{start}-{end}")
+                        start = end = n
+                ranges.append(str(start) if start == end else f"{start}-{end}")
+                
+                stt_str = ", ".join(ranges)
+                self.log(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", "TECH")
+                self.log(f"  ⚠️  KHOẢNG TRỐNG CẦN XỬ LÝ", "WARNING")
+                self.log(f"  📁  Dự án  : {os.path.basename(inp)}", "TECH")
+                self.log(f"  📌  STT thiếu : {stt_str}", "TECH")
+                self.log(f"  📊  Tổng cộng : {len(final_pending)} mục", "TECH")
+                self.log(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", "TECH")
+            else:
+                self.log(f"✨ Dự án '{os.path.basename(inp)}' hoàn thành 100%!", "SUCCESS")
+        except Exception as e:
+            self.log(f"⚠️ Không kiểm tra được trạng thái cuối: {e}", "WARNING")
 
     def continuous_profile_runner(self, profile_name, loop_type, inp_path, inp2_path, out_path, prompt, url, languages, shuffle_gems):
         while not self.stop_event.is_set():
