@@ -48,7 +48,8 @@ class DashboardTab(ttk.Frame):
         self.cbo_mode['values'] = (
             "SRT ➡ Prompt", 
             "Prompt ➡ Image", 
-            "Image + Prompt ➡ Video"
+            "Image + Prompt ➡ Video",
+            "Video ➡ Stretch (Timecode)"
         )
         self.cbo_mode.pack(side="left", padx=5)
         self.cbo_mode.bind("<<ComboboxSelected>>", self._on_mode_change)
@@ -160,9 +161,9 @@ class DashboardTab(ttk.Frame):
     def _on_mode_change(self, event):
         mode = self.selected_mode.get()
             
-        if mode == "Image + Prompt ➡ Video":
+        if mode in ["Image + Prompt ➡ Video", "Video ➡ Stretch (Timecode)"]:
             self.lbl_in.config(text="File JSON Prompt:")
-            self.lbl_in2.configure(text="Thư mục Ảnh:")
+            self.lbl_in2.configure(text="Thư mục Ảnh:" if mode == "Image + Prompt ➡ Video" else "Thư mục Video Gốc:")
             self.lbl_in2.grid(row=1, column=0, sticky="w", padx=5, pady=5)
             self.entry_in2.grid(row=1, column=1, sticky="ew", padx=5)
             self.btn_in2.grid(row=1, column=2, padx=5)
@@ -174,7 +175,7 @@ class DashboardTab(ttk.Frame):
 
     def _pick_input(self):
         mode = self.selected_mode.get()
-        file_modes = ["SRT ➡ Prompt", "Prompt ➡ Image", "Image + Prompt ➡ Video"]
+        file_modes = ["SRT ➡ Prompt", "Prompt ➡ Image", "Image + Prompt ➡ Video", "Video ➡ Stretch (Timecode)"]
         
         if mode in file_modes:
             if "SRT" in mode:
@@ -201,12 +202,12 @@ class DashboardTab(ttk.Frame):
             messagebox.showwarning("Thiếu thông tin", "Vui lòng nhập đầy đủ Input, Output và chọn GEM!")
             return
             
-        if mode == "Image + Prompt ➡ Video":
+        if mode in ["Image + Prompt ➡ Video", "Video ➡ Stretch (Timecode)"]:
             if not inp or not os.path.isfile(inp):
                 messagebox.showerror("Lỗi", "Vui lòng chọn File JSON.")
                 return
             if not inp2 or not os.path.isdir(inp2):
-                messagebox.showerror("Lỗi", "Vui lòng chọn Thư mục Ảnh.")
+                messagebox.showerror("Lỗi", "Vui lòng chọn Thư mục Input 2 (Ảnh/Video).")
                 return
 
         real_url = next((g["url"] for g in self.gems_data if g["name"] == gem_name), "https://gemini.google.com")

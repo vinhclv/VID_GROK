@@ -201,7 +201,7 @@ async def process_1_image_video_batch(page: Page, file_batch: list, output_folde
     
     try:
         # Tìm chính xác nút Saved bằng aria-label hoặc text (không sợ nhầm sang nút + Upload ảnh)
-        btn_saved = page.locator("button[aria-label='Saved'], button:has-text('Saved')").first
+        btn_saved = page.locator("button[aria-label='Saved'], button[aria-label='Đã lưu'], button:has-text('Saved'), button:has-text('Đã lưu')").first
         if await btn_saved.is_visible(timeout=3000):
             await human_click(btn_saved, page)
             log_callback(f'➡️ Đã click nút Đã lưu (Saved) để dọn context trước khi chạy')
@@ -242,7 +242,7 @@ async def process_1_image_video_batch(page: Page, file_batch: list, output_folde
                 try:
                     await page.wait_for_timeout(random.uniform(2000, 3000))
                     # Tìm chính xác nút Saved bằng aria-label hoặc text (không sợ nhầm sang nút + Upload ảnh)
-                    btn_saved = page.locator("button[aria-label='Saved'], button:has-text('Saved')").first
+                    btn_saved = page.locator("button[aria-label='Saved'], button[aria-label='Đã lưu'], button:has-text('Saved'), button:has-text('Đã lưu')").first
                     if await btn_saved.is_visible(timeout=3000):
                         await human_click(btn_saved, page)
                         log_callback(f'➡️ Đã click nút Đã lưu (Saved) để chuyển context (STT {stt})')
@@ -265,6 +265,18 @@ async def process_1_image_video_batch(page: Page, file_batch: list, output_folde
             # Focus
             await human_click(textbox, page)
             await page.wait_for_timeout(500)
+
+            # Dọn rác ảnh đính kèm (nếu bị kẹt từ phiên trước chưa kịp xóa) một lần duy nhất trước khi làm việc
+            try:
+                remove_btns = page.locator("button[aria-label='Remove image']")
+                count = await remove_btns.count()
+                if count > 0:
+                    log_callback('🧹 Phát hiện ảnh kẹt từ phiên trước, đang dọn dẹp mặt bằng...')
+                    for _ in range(count):
+                        await remove_btns.nth(0).click(timeout=1000)
+                        await page.wait_for_timeout(200)
+            except:
+                pass
             
             # Dán tất cả các ảnh 1 lần duy nhất
             if image_paths:
@@ -284,10 +296,18 @@ async def process_1_image_video_batch(page: Page, file_batch: list, output_folde
             btn_gen = page.locator("form div.absolute.right-2 button, form button[type='submit']").last
             if await btn_gen.is_visible(timeout=2000):
                 # Chờ nút Submit sáng lên (Đợi ảnh upload lên server Grok xong)
+                submit_enabled = False
                 for _ in range(15):
                     if await btn_gen.is_enabled():
+                        submit_enabled = True
                         break
                     await page.wait_for_timeout(1000)
+                
+                if not submit_enabled:
+                    log_callback(f'⚠️ Nút Gửi bị khóa quá 15s (STT {stt}) do ảnh kẹt/lỗi mạng. Bỏ qua STT này.')
+                    tasks.pop(stt, None)
+                    continue # Chuyển sang xử lý STT tiếp theo
+                    
                 await human_click(btn_gen, page)
             else:
                 await textbox.press("Enter")

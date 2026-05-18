@@ -19,6 +19,12 @@ def run_worker_task(profile_folder, batch, task_type, assets_path, prompt, url, 
 
     task_log(f"🚀 Khởi động (Task: {task_type})...")
 
+    # --- NẾU LÀ STRETCH VIDEO: CHẠY LOCAL FFMPEG VÀ RETURN LUÔN ---
+    if task_type == "stretch_video":
+        from utils.stretch_video import handle_stretch_video
+        is_healthy, failed_items = handle_stretch_video(batch, assets_path, task_log)
+        return is_healthy, failed_items
+
     # --- NẾU LÀ PLAYWRIGHT: ĐẨY SANG CẦU NỐI VÀ RETURN LUÔN ---
     if task_type in ["1_image_prompt_video"]:
         is_healthy, failed_items = run_playwright_batch_sync(

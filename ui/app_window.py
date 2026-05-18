@@ -89,9 +89,19 @@ class BatchApp:
         mode_map = {
             "SRT ➡ Prompt": "srt_prompt",
             "Prompt ➡ Image": "prompt_image",
-            "Image + Prompt ➡ Video": "1_image_prompt_video"
+            "Image + Prompt ➡ Video": "1_image_prompt_video",
+            "Video ➡ Stretch (Timecode)": "stretch_video"
         }
         loop_type = mode_map.get(mode_text, "image_prompt")
+
+        # Tiền kiểm tra cứng cho chế độ Stretch Video
+        if loop_type == "stretch_video":
+            from utils.file_ops import validate_stretch_videos
+            for p in queue_data:
+                is_valid, err_msg = validate_stretch_videos(p["input"], p["input2"])
+                if not is_valid:
+                    messagebox.showerror("Lỗi dữ liệu", f"Dự án: {os.path.basename(p['input'])}\n{err_msg}")
+                    return
 
         # 3. Lấy Profiles
         profiles = self.tab_profiles.get_selected_profiles()

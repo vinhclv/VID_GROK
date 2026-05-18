@@ -194,3 +194,107 @@ def get_1_image_prompt_video_status(json_path, img_dir, out_dir):
         print(f"❌ Lỗi quét 1_image_prompt_video: {e}")
         
     return pending, completed
+
+def get_stretch_video_status(json_path, video_in_dir, out_dir):
+    pending = []
+    completed = []
+    
+    if not os.path.exists(json_path) or not os.path.exists(video_in_dir):
+        return [], []
+        
+    try:
+        import json
+        with open(json_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            
+        for item in data:
+            stt = str(item.get("STT"))
+            timecode = item.get("timecode", "")
+            
+            start_time_str = "00-00-00-000"
+            duration = 5.0
+            
+            if timecode:
+                try:
+                    parts = timecode.split("-->")
+                    if len(parts) == 2:
+                        start_part = parts[0].strip()
+                        start_time_str = start_part.replace(":", "-").replace(",", "-")
+                        
+                        def to_seconds(tc):
+                            tc = tc.strip()
+                            h, m, s = tc.split(':')
+                            s, ms = s.split(',')
+                            return int(h) * 3600 + int(m) * 60 + int(s) + int(ms) / 1000
+                            
+                        duration = to_seconds(parts[1]) - to_seconds(parts[0])
+                except:
+                    pass
+                    
+            input_video_path = os.path.join(video_in_dir, f"{start_time_str}.mp4")
+            output_video_path = os.path.join(out_dir, f"{start_time_str}.mp4")
+
+            task_item = {
+                "STT": stt,
+                "video_in": input_video_path,
+                "video_out": output_video_path,
+                "duration": duration,
+                "Timecode": timecode
+            }
+            
+            if os.path.exists(output_video_path) and os.path.getsize(output_video_path) > 0:
+                completed.append(task_item)
+            else:
+                pending.append(task_item)
+                
+    except Exception as e:
+        print(f"❌ Lỗi quét stretch_video: {e}")
+        
+    return pending, completed
+
+def validate_stretch_videos(json_path, video_in_dir):
+    """
+    Hàm kiểm tra cứng trước khi chạy Batch.
+    Kiểm tra xem tất cả các mục trong file JSON có file video tương ứng trong thư mục Input hay không.
+    Trả về (True, "") nếu mọi thứ đều khớp.
+    Trả về (False, "Lý do lỗi") nếu có bất kỳ file nào bị thiếu.
+    """
+    if not os.path.exists(json_path):
+        return False, f"Không tìm thấy file JSON: {json_path}"
+    if not os.path.exists(video_in_dir):
+        return False, f"Không tìm thấy thư mục video gốc: {video_in_dir}"
+        
+    try:
+        import json
+        with open(json_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            
+        missing_files = []
+        for item in data:
+            stt = str(item.get("STT"))
+            timecode = item.get("timecode", "")
+            start_time_str = "00-00-00-000"
+            
+            if timecode:
+                try:
+                    parts = timecode.split("-->")
+                    if len(parts) == 2:
+                        start_part = parts[0].strip()
+                        start_time_str = start_part.replace(":", "-").replace(",", "-")
+                except:
+                    pass
+                    
+            input_video_path = os.path.join(video_in_dir, f"{start_time_str}.mp4")
+            if not os.path.exists(input_video_path):
+                missing_files.append(f"STT: {stt} -> {start_time_str}.mp4")
+                
+        if missing_files:
+            err_msg = f"Thiếu {len(missing_files)} file video so với JSON!\nCác file bị thiếu:\n" + "\n".join(missing_files[:5])
+            if len(missing_files) > 5:
+                err_msg += f"\n... và {len(missing_files) - 5} file khác."
+            return False, err_msg
+            
+        return True, ""
+    except Exception as e:
+        return False, f"Lỗi đọc JSON: {e}"
+

@@ -6,7 +6,7 @@ import os
 import concurrent.futures
 
 from config import DEFAULT_PROFILES
-from utils.file_ops import get_srt_prompt_status, get_prompt_image_status, get_1_image_prompt_video_status
+from utils.file_ops import get_srt_prompt_status, get_prompt_image_status, get_1_image_prompt_video_status, get_stretch_video_status
 from engine.worker import run_worker_task
 import config
 class BatchProcessor:
@@ -69,11 +69,16 @@ class BatchProcessor:
                     pending, _ = get_prompt_image_status(inp, out)
                 case "1_image_prompt_video":
                     pending, _ = get_1_image_prompt_video_status(inp, inp2, out)
+                case "stretch_video":
+                    pending, _ = get_stretch_video_status(inp, inp2, out)
                 case _:
                     pending, _ = [], []
 
             if not pending:
                 self.log(f"✅ Dự án {os.path.basename(inp)} hoàn thành!", "SUCCESS")
+                if loop_type == "stretch_video":
+                    from utils.stretch_video import merge_videos_ffmpeg
+                    merge_videos_ffmpeg(inp, out, self.log)
                 break 
 
             living_profiles = [p for p in profiles if self.profile_health.get(p, 0) < config.global_settings["system"]["max_retries"]]
@@ -128,6 +133,10 @@ class BatchProcessor:
                         actual_pending, _ = get_1_image_prompt_video_status(inp_path, inp2_path, out_path)
                         ap_stts = [i.get("STT") for i in actual_pending]
                         batch = [item for item in candidates if isinstance(item, dict) and item.get("STT") in ap_stts]
+                    case "stretch_video":
+                        actual_pending, _ = get_stretch_video_status(inp_path, inp2_path, out_path)
+                        ap_stts = [i.get("STT") for i in actual_pending]
+                        batch = [item for item in candidates if isinstance(item, dict) and item.get("STT") in ap_stts]
                     case _:
                         actual_pending, _ = [], []
                         batch = []
@@ -160,6 +169,8 @@ class BatchProcessor:
                             pending, completed = get_prompt_image_status(inp, out)
                         case "1_image_prompt_video":
                             pending, completed = get_1_image_prompt_video_status(inp, inp2, out)
+                        case "stretch_video":
+                            pending, completed = get_stretch_video_status(inp, inp2, out)
                         case _:
                             pending, completed = [], []
 
