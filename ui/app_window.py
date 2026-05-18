@@ -100,7 +100,16 @@ class BatchApp:
             for p in queue_data:
                 is_valid, err_msg = validate_stretch_videos(p["input"], p["input2"])
                 if not is_valid:
-                    messagebox.showerror("Lỗi dữ liệu", f"Dự án: {os.path.basename(p['input'])}\n{err_msg}")
+                    self.log(f"❌ Dự án: {os.path.basename(p['input'])} | {err_msg}", "ERROR")
+                    return
+
+        # Tien kiem tra dinh dang Timecode cho che do Image+Prompt -> Video
+        if loop_type == "1_image_prompt_video":
+            from utils.validators import validate_timecodes
+            for p in queue_data:
+                ok, err_msg = validate_timecodes(p["input"])
+                if not ok:
+                    self.log(f"❌ Timecode sai định dạng:\n{err_msg}", "ERROR")
                     return
 
         # 3. Lấy Profiles

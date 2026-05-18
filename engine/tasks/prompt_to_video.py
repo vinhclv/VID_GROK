@@ -287,7 +287,7 @@ async def process_1_image_video_batch(page: Page, file_batch: list, output_folde
                 log_callback(f'⚠️ Không có ảnh nhân vật cho STT {stt}, render chỉ từ Prompt.')
 
             # Nhập Text (Xóa text cũ của bản nháp nếu có trước khi gõ)
-            full_prompt = f"{id_tag} {prompt_text} --mode=custom"
+            full_prompt = f"{id_tag} {prompt_text}"
             await textbox.fill("") 
             await human_type(textbox, full_prompt, page)
             await page.wait_for_timeout(random.uniform(1000, 2000))
