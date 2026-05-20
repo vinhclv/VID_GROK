@@ -195,7 +195,7 @@ class BatchProcessor:
             else: self.profile_health[profile_name] += 1
 
     def monitor_loop(self, update_ui_callback):
-        while True:
+        while not self.stop_event.is_set():
             if self.current_monitoring_info:
                 try:
                     inp, inp2, out, loop_type, languages, shuffle_gems = self.current_monitoring_info

@@ -250,6 +250,24 @@ class DashboardTab(ttk.Frame):
         self.project_queue.clear()
         self.refresh_treeview()
 
+    def add_project_direct(self, inp, inp2, out, url, gem_name, prompt=""):
+        """
+        Thêm project vào queue theo cách lập trình (không qua form UI).
+        Dùng bởi ImportProjectTab để bulk-import nhiều project cùng lúc.
+        """
+        self.project_queue.append({
+            "input":       inp,
+            "input2":      inp2,
+            "output":      out,
+            "url":         url,
+            "gem_name":    gem_name,
+            "prompt":      prompt,
+            "languages":   [],
+            "shuffle_gems": [],
+            "status":      "Waiting"
+        })
+        self.refresh_treeview()
+
     def refresh_treeview(self):
         for item in self.tree.get_children(): self.tree.delete(item)
         for i, p in enumerate(self.project_queue):

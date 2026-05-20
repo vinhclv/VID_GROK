@@ -10,6 +10,7 @@ from config import DEFAULT_PROFILES
 from ui.profile_tab import ProfileManagerTab  
 from ui.dashboard_tab import DashboardTab      
 from ui.settings_tab import SettingsTab       
+from ui.import_tab import ImportProjectTab    
 from engine.batch_processor import BatchProcessor 
 
 # Định nghĩa đường dẫn thư mục chứa Profiles
@@ -45,6 +46,10 @@ class BatchApp:
         # TAB 3: Settings
         self.tab_settings = SettingsTab(self.notebook)
         self.notebook.add(self.tab_settings, text="⚙️ Cài đặt")
+
+        # TAB 4: Import Project
+        self.tab_import = ImportProjectTab(self.notebook, self)
+        self.notebook.add(self.tab_import, text="📥 Import Project")
 
         # LOGS
         frame_log = ttk.LabelFrame(self.root, text="📜 Nhật ký hoạt động", padding=10)
@@ -103,14 +108,23 @@ class BatchApp:
                     self.log(f"❌ Dự án: {os.path.basename(p['input'])} | {err_msg}", "ERROR")
                     return
 
-        # Tien kiem tra dinh dang Timecode cho che do Image+Prompt -> Video
+        # Tiền kiểm tra định dạng Timecode cho chế độ Image+Prompt -> Video
+        # Bỏ qua project lỗi, tiếp tục chạy các project còn lại
         if loop_type == "1_image_prompt_video":
             from utils.validators import validate_timecodes
-            for p in queue_data:
+            valid_queue = []
+            for i, p in enumerate(queue_data):
                 ok, err_msg = validate_timecodes(p["input"])
                 if not ok:
-                    self.log(f"❌ Timecode sai định dạng:\n{err_msg}", "ERROR")
-                    return
+                    self.log(f"⚠️ Bỏ qua '{os.path.basename(p['input'])}': Timecode sai định dạng\n{err_msg}", "WARNING")
+                    self.update_project_status_callback(i, "Skipped ⏭️")
+                else:
+                    valid_queue.append(p)
+
+            if not valid_queue:
+                self.log("❌ Tất cả project đều bị bỏ qua (timecode sai). Không có gì để chạy.", "ERROR")
+                return
+            queue_data = valid_queue
 
         # 3. Lấy Profiles
         profiles = self.tab_profiles.get_selected_profiles()

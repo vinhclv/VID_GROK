@@ -272,7 +272,8 @@ class SettingsTab(ttk.Frame):
             # Load lại từ hàm load_config (nó sẽ reset nếu ta xóa file hoặc ta gán thủ công)
             # Ở đây ta gán thủ công từ DEFAULT_CONFIG_DATA copy
             import json
-            config.global_settings = json.loads(json.dumps(config.DEFAULT_CONFIG_DATA))
+            config.global_settings.clear()
+            config.global_settings.update(json.loads(json.dumps(config.DEFAULT_CONFIG_DATA)))
             
             # Refresh UI
             self.var_threads.set(config.global_settings["system"]["max_threads"])
