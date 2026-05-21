@@ -4,27 +4,31 @@ from tkinter import ttk, filedialog, messagebox
 
 import config
 
+
+# ───────────────────────────────────────────────────────────────────────────────
 # ─────────────────────────────────────────────────────────────────────────────
 # CONFIG DICT: Thêm mode mới = thêm 1 entry vào đây, không đụng code logic
 # ─────────────────────────────────────────────────────────────────────────────
 IMPORT_MODES = {
     "Image + Prompt ➡ Video": {
-        "required_subdirs": ["character", "output"],
-        "input2_folder":    "character",
-        "output_folder":    "output",
-        "auto_create_out":  False,
-        "badges":           ["📸 character/", "📤 output/"],
-        "loop_type":        "1_image_prompt_video",
-        "need_gem":         True,
+        "required_subdirs":  ["character", "output"],
+        "input2_folder":     "character",
+        "output_folder":     "output",
+        "auto_create_out":   False,
+        "badges":            ["📸 character/", "📤 output/"],
+        "loop_type":         "1_image_prompt_video",
+        "need_gem":          True,
+        "validate_timecode": True,   # Kiểm tra timecode trong JSON khi quét
     },
     "Video ➡ Stretch (Timecode)": {
-        "required_subdirs": ["output"],
-        "input2_folder":    "output",
-        "output_folder":    "final",
-        "auto_create_out":  True,
-        "badges":           ["🎬 output/", "📤 final/ (auto)"],
-        "loop_type":        "stretch_video",
-        "need_gem":         False,
+        "required_subdirs":  ["output"],
+        "input2_folder":     "output",
+        "output_folder":     "final",
+        "auto_create_out":   True,
+        "badges":            ["🎬 output/", "📤 final/ (auto)"],
+        "loop_type":         "stretch_video",
+        "need_gem":          False,
+        "validate_timecode": True,   # Kiểm tra timecode trong JSON khi quét
     },
 }
 
@@ -216,6 +220,26 @@ class ImportProjectTab(ttk.Frame):
         self._update_counter()
         self.btn_add.config(state="normal")
 
+        # Log tất cả lỗi timecode xuống nhật ký
+        for name, data in valid.items():
+            if not data.get("tc_ok", True):
+                bad_stts = data.get("tc_bad_stts", [])
+                if bad_stts:
+                    stts_str = ", ".join(bad_stts)
+                    self.controller.log(
+                        f"⚠️  [{name}] Timecode sai định dạng — STT lỗi: {stts_str}",
+                        "WARNING"
+                    )
+                else:
+                    # Lỗi khác (vd: không đọc được file JSON)
+                    tc_err   = data.get("tc_err", "")
+                    err_line = tc_err.splitlines()[0].strip() if tc_err else "Lỗi không xác định"
+                    self.controller.log(
+                        f"⚠️  [{name}] {err_line}",
+                        "WARNING"
+                    )
+
+
     def _find_valid_folders(self, root_path: str, cfg: dict) -> dict:
         """
         Generic scanner: hợp lệ khi có đúng 1 .json và tất cả required_subdirs tồn tại.
@@ -251,10 +275,27 @@ class ImportProjectTab(ttk.Frame):
                     and os.path.isfile(os.path.join(folder_path, f))
                 ]
                 if len(json_files) == 1:
+                    json_path = os.path.join(folder_path, json_files[0])
+
+                    # Validate timecode nếu mode yêu cầu
+                    tc_ok      = True
+                    tc_err     = ""
+                    tc_bad_stts = []
+                    if cfg.get("validate_timecode"):
+                        import re as _re
+                        from utils.validators import validate_timecodes
+                        tc_ok, tc_err = validate_timecodes(json_path)
+                        if not tc_ok:
+                            # Parse ra danh sách STT từ thông báo lỗi
+                            tc_bad_stts = _re.findall(r'STT (\S+?):', tc_err)
+
                     result[name] = {
-                        "json":    os.path.join(folder_path, json_files[0]),
-                        "subdirs": found_subdirs,
-                        "root":    folder_path,
+                        "json":         json_path,
+                        "subdirs":      found_subdirs,
+                        "root":         folder_path,
+                        "tc_ok":        tc_ok,
+                        "tc_err":       tc_err,
+                        "tc_bad_stts":  tc_bad_stts,
                     }
 
         return result
@@ -276,31 +317,34 @@ class ImportProjectTab(ttk.Frame):
     # RENDER ROWS
     # ─────────────────────────────────────────────
     def _add_folder_row(self, idx: int, name: str, data: dict, cfg: dict):
+        tc_ok  = data.get("tc_ok", True)
+        tc_err = data.get("tc_err", "")
         bg = self.ROW_EVEN if idx % 2 == 0 else self.ROW_ODD
 
         card = tk.Frame(self.scroll_frame, bg=bg, pady=5, padx=8)
         card.pack(fill="x")
+        card.bind("<MouseWheel>", self._on_mousewheel)
+        card.bind("<Enter>",  lambda e, f=card: f.config(bg=self.ROW_HOVER))
+        card.bind("<Leave>",  lambda e, f=card, b=bg: f.config(bg=b))
 
-        for widget in [card]:
-            widget.bind("<MouseWheel>", self._on_mousewheel)
-            widget.bind("<Enter>",  lambda e, f=card: f.config(bg=self.ROW_HOVER))
-            widget.bind("<Leave>",  lambda e, f=card, b=bg: f.config(bg=b))
-
-        # Checkbox
-        var = tk.BooleanVar(value=True)
+        # Checkbox — disabled nếu timecode sai
+        var = tk.BooleanVar(value=tc_ok)   # sử lý: sai thì uncheck luôn
         self.folder_vars[name] = var
 
         chk = ttk.Checkbutton(card, variable=var,
                                command=self._update_counter, cursor="hand2")
+        if not tc_ok:
+            chk.state(["disabled"])        # disable, không cho chọn
         chk.pack(side="left", padx=(0, 4))
 
         # STT
         tk.Label(card, text=f"{idx+1:>3}.", bg=bg,
                  fg="#555", font=("Segoe UI", 9), width=3).pack(side="left", padx=(0, 6))
 
-        # Folder name (bold)
+        # Folder name — vàng nếu lỗi, trắng nếu ok
+        name_color = "#ffaa00" if not tc_ok else "#e0e0e0"
         tk.Label(card, text=name, bg=bg,
-                 fg="#e0e0e0", font=("Segoe UI", 10, "bold"),
+                 fg=name_color, font=("Segoe UI", 10, "bold"),
                  width=20, anchor="w").pack(side="left", padx=(0, 12))
 
         # JSON filename
@@ -310,10 +354,22 @@ class ImportProjectTab(ttk.Frame):
                  fg="#cccccc", font=("Consolas", 8),
                  width=26, anchor="w").pack(side="left", padx=(0, 10))
 
-        # Badges — plain text, không màu nền
-        for label in cfg["badges"]:
-            tk.Label(card, text=label, bg=bg,
-                     fg="#aaaaaa", font=("Segoe UI", 8)).pack(side="left", padx=(0, 10))
+        if tc_ok:
+            # Badges bình thường
+            for label in cfg["badges"]:
+                tk.Label(card, text=label, bg=bg,
+                         fg="#aaaaaa", font=("Segoe UI", 8)).pack(side="left", padx=(0, 10))
+        else:
+            # Hiển thị các STT bị lỗi
+            bad_stts = data.get("tc_bad_stts", [])
+            if bad_stts:
+                stts_str = ", ".join(bad_stts[:8])
+                suffix   = f" (+{len(bad_stts)-8} nữa)" if len(bad_stts) > 8 else ""
+                warn_txt = f"⚠️ STT lỗi: {stts_str}{suffix}"
+            else:
+                warn_txt = "⚠️ Timecode sai định dạng"
+            tk.Label(card, text=warn_txt, bg=bg,
+                     fg="#ffaa00", font=("Segoe UI", 8, "bold")).pack(side="left", padx=(0, 6))
 
         # Path gốc (dim, right-aligned)
         root_disp = self._short_path(data["root"])
@@ -323,6 +379,7 @@ class ImportProjectTab(ttk.Frame):
 
         # Separator
         tk.Frame(self.scroll_frame, bg="#333333", height=1).pack(fill="x")
+
 
     @staticmethod
     def _short_path(path: str, max_len: int = 45) -> str:
@@ -375,13 +432,11 @@ class ImportProjectTab(ttk.Frame):
 
         cfg = IMPORT_MODES[self.selected_mode.get()]
 
-        # ── Lấy URL ──────────────────────────────
-        url = config.global_settings.get("urls", {}).get(
-            "videofx_url", "https://labs.google/fx/tools/video-fx")
-
-        # ── Lấy GEM nếu mode cần ─────────────────
+        # ── Lấy GEM và URL từ gem["url"] ───────────────
         gem_name = ""
+        url      = ""
         if cfg["need_gem"]:
+
             gems = config.global_settings.get("gems", [])
             if not gems:
                 messagebox.showwarning(
@@ -390,10 +445,11 @@ class ImportProjectTab(ttk.Frame):
                     "Vui lòng thêm GEM trước (Tab ⚙️ Cài đặt).")
                 return
             grok_gems = [g for g in gems if "grok" in g.get("name", "").lower()]
-            gem_name  = grok_gems[0]["name"] if grok_gems else gems[0]["name"]
+            gem       = grok_gems[0] if grok_gems else gems[0]
+            gem_name  = gem["name"]
+            url       = gem.get("url", "")    # ← URL lấy từ GEM, không phải videofx_url
         else:
-            # Stretch mode: không cần GEM thật, dùng "Local FFmpeg" để hiển thị
-            gem_name = "Local FFmpeg"
+            gem_name = "Local FFmpeg"         # Stretch mode: FFmpeg local
 
         # ── Add từng project ─────────────────────
         dashboard = self.controller.tab_dashboard
@@ -403,6 +459,10 @@ class ImportProjectTab(ttk.Frame):
             if name not in self.folder_data:
                 continue
             data = self.folder_data[name]
+
+            # Bỏ qua nếu timecode sai (checkbox đã disabled nhưng guard chắc chắn)
+            if not data.get("tc_ok", True):
+                continue
 
             # input2: folder nguồn (character/ hoặc output/)
             inp2 = data["subdirs"].get(cfg["input2_folder"], "")
@@ -422,6 +482,7 @@ class ImportProjectTab(ttk.Frame):
                 gem_name = gem_name,
             )
             count += 1
+
 
         # Switch về Dashboard
         self.controller.notebook.select(self.controller.tab_dashboard)
