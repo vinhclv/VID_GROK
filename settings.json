@@ -3,7 +3,8 @@
         "max_threads": 2,
         "loop_limit": 4,
         "max_retries": 10,
-        "wait_time": 100,
+        "max_stt_retries": 1,
+        "wait_time": 1,
         "aspect_ratio": "16:9",
         "resolution": "480p"
     },

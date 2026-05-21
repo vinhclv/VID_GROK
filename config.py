@@ -18,6 +18,7 @@ DEFAULT_CONFIG_DATA = {
         "max_threads": 3,
         "loop_limit": 5,
         "max_retries": 30,
+        "max_stt_retries": 5,
         "wait_time": 30,
         "aspect_ratio": "16:9",
         "resolution": "720p"

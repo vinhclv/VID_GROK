@@ -137,22 +137,37 @@ class DashboardTab(ttk.Frame):
         frame_list = ttk.LabelFrame(self, text="📋 Hàng chờ", padding=10)
         frame_list.pack(fill="both", expand=True, padx=10, pady=5)
 
-        columns = ("stt", "input", "output", "gem", "prompt", "status")
-        self.tree = ttk.Treeview(frame_list, columns=columns, show="headings", height=6)
-        
-        titles = {"stt": "#", "input": "Input", "output": "Output", "gem": "GEM", "prompt": "Prompt", "status": "Trạng thái"}
-        widths = {"stt": 30, "input": 200, "output": 200, "gem": 100, "prompt": 150, "status": 100}
-        for col, txt in titles.items():
-            self.tree.heading(col, text=txt)
-            self.tree.column(col, width=widths[col], anchor="center" if col in ["stt", "status"] else "w")
-        
-        self.tree.pack(side="left", fill="both", expand=True)
-        sb = ttk.Scrollbar(frame_list, orient="vertical", command=self.tree.yview)
-        sb.pack(side="right", fill="y"); self.tree.configure(yscrollcommand=sb.set)
-
-        frame_act = ttk.Frame(frame_list); frame_act.pack(side="bottom", fill="x", pady=5)
+        # Action bar (nút Xóa) — pack trước để không bị đẩy khi scroll
+        frame_act = ttk.Frame(frame_list)
+        frame_act.pack(side="bottom", fill="x", pady=5)
         ttk.Button(frame_act, text="❌ Xóa", command=self.remove_selected_project).pack(side="right")
         ttk.Button(frame_act, text="🧹 Xóa hết", command=self.clear_all_projects).pack(side="right", padx=5)
+
+        # Container cho tree + 2 scrollbar
+        tree_container = ttk.Frame(frame_list)
+        tree_container.pack(fill="both", expand=True)
+
+        columns = ("stt", "input", "output", "gem", "prompt", "status")
+        self.tree = ttk.Treeview(tree_container, columns=columns, show="headings", height=6)
+
+        titles = {"stt": "#", "input": "Input", "output": "Output", "gem": "GEM", "prompt": "Prompt", "status": "Trạng thái"}
+        widths = {"stt": 35, "input": 200, "output": 200, "gem": 80, "prompt": 150, "status": 280}
+        for col, txt in titles.items():
+            self.tree.heading(col, text=txt)
+            self.tree.column(col, width=widths[col], minwidth=widths[col],
+                             stretch=False,
+                             anchor="center" if col in ["stt", "status"] else "w")
+
+        # Vertical scrollbar
+        sb_y = ttk.Scrollbar(tree_container, orient="vertical",   command=self.tree.yview)
+        # Horizontal scrollbar
+        sb_x = ttk.Scrollbar(tree_container, orient="horizontal", command=self.tree.xview)
+
+        self.tree.configure(yscrollcommand=sb_y.set, xscrollcommand=sb_x.set)
+
+        sb_y.pack(side="right",  fill="y")
+        sb_x.pack(side="bottom", fill="x")
+        self.tree.pack(side="left", fill="both", expand=True)
 
 
     # ==========================================

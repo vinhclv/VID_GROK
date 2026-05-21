@@ -126,9 +126,17 @@ class ProfileManagerTab(ttk.Frame):
         try:
             size_mb = self.get_size(path)
             # Use after() to update UI from thread
-            self.after(0, lambda: ttk.Label(card_frame, text=f"{size_mb:.1f} MB", font=("Segoe UI", 8), foreground="#888").pack(side="right", padx=10))
+            def _set_label():
+                try:
+                    if card_frame.winfo_exists():
+                        ttk.Label(card_frame, text=f"{size_mb:.1f} MB",
+                                  font=("Segoe UI", 8), foreground="#888").pack(side="right", padx=10)
+                except Exception:
+                    pass
+            self.after(0, _set_label)
         except:
             pass
+
 
     def get_selected_profiles(self):
         """Return list of selected profile names"""

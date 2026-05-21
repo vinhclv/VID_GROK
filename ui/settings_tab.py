@@ -37,28 +37,33 @@ class SettingsTab(ttk.Frame):
         self.var_retries = tk.IntVar(value=self.settings["system"].get("max_retries", 30))
         ttk.Entry(left_frame, textvariable=self.var_retries, width=15).grid(row=5, column=0, sticky="ew")
 
-        # 4. Wait Time
-        tk.Label(left_frame, text="Wait Time (s):", anchor="w").grid(row=6, column=0, sticky="w", pady=(15, 5))
-        self.var_wait_time = tk.IntVar(value=self.settings["system"].get("wait_time", 5))
-        ttk.Spinbox(left_frame, from_=1, to=60, textvariable=self.var_wait_time, width=15).grid(row=7, column=0, sticky="ew")
+        # 4. Max STT Retries
+        tk.Label(left_frame, text="Max STT Retries:", anchor="w").grid(row=6, column=0, sticky="w", pady=(15, 5))
+        self.var_stt_retries = tk.IntVar(value=self.settings["system"].get("max_stt_retries", 5))
+        ttk.Spinbox(left_frame, from_=1, to=20, textvariable=self.var_stt_retries, width=15).grid(row=7, column=0, sticky="ew")
 
-        # 5. Aspect Ratio (Grok Video)
-        tk.Label(left_frame, text="Aspect Ratio (Grok):", anchor="w").grid(row=8, column=0, sticky="w", pady=(15, 5))
+        # 5. Wait Time
+        tk.Label(left_frame, text="Wait Time (s):", anchor="w").grid(row=8, column=0, sticky="w", pady=(15, 5))
+        self.var_wait_time = tk.IntVar(value=self.settings["system"].get("wait_time", 5))
+        ttk.Spinbox(left_frame, from_=1, to=60, textvariable=self.var_wait_time, width=15).grid(row=9, column=0, sticky="ew")
+
+        # 6. Aspect Ratio (Grok Video)
+        tk.Label(left_frame, text="Aspect Ratio (Grok):", anchor="w").grid(row=10, column=0, sticky="w", pady=(15, 5))
         self.var_aspect_ratio = tk.StringVar(value=self.settings["system"].get("aspect_ratio", "16:9"))
         cb_ar = ttk.Combobox(left_frame, textvariable=self.var_aspect_ratio, values=["16:9", "9:16", "1:1"], state="readonly", width=13)
-        cb_ar.grid(row=9, column=0, sticky="ew")
+        cb_ar.grid(row=11, column=0, sticky="ew")
 
-        # 6. Resolution (Grok Video)
-        tk.Label(left_frame, text="Resolution (Grok):", anchor="w").grid(row=10, column=0, sticky="w", pady=(15, 5))
+        # 7. Resolution (Grok Video)
+        tk.Label(left_frame, text="Resolution (Grok):", anchor="w").grid(row=12, column=0, sticky="w", pady=(15, 5))
         self.var_resolution = tk.StringVar(value=self.settings["system"].get("resolution", "720p"))
         cb_res = ttk.Combobox(left_frame, textvariable=self.var_resolution, values=["720p", "1080p", "480p"], state="readonly", width=13)
-        cb_res.grid(row=11, column=0, sticky="ew")
+        cb_res.grid(row=13, column=0, sticky="ew")
 
         # Nút Save nằm dưới cùng, giãn cách xa một chút
-        ttk.Separator(left_frame, orient='horizontal').grid(row=12, column=0, sticky="ew", pady=20)
+        ttk.Separator(left_frame, orient='horizontal').grid(row=14, column=0, sticky="ew", pady=20)
         
-        ttk.Button(left_frame, text="💾 LƯU CẤU HÌNH", style="Accent.TButton", command=self.save_settings).grid(row=13, column=0, sticky="ew", pady=5)
-        ttk.Button(left_frame, text="🔄 Mặc định", command=self.reset_defaults).grid(row=14, column=0, sticky="ew")
+        ttk.Button(left_frame, text="💾 LƯU CẤU HÌNH", style="Accent.TButton", command=self.save_settings).grid(row=15, column=0, sticky="ew", pady=5)
+        ttk.Button(left_frame, text="🔄 Mặc định", command=self.reset_defaults).grid(row=16, column=0, sticky="ew")
 
         left_frame.columnconfigure(0, weight=1) # Để các input giãn full bề ngang cột trái
 
@@ -255,10 +260,11 @@ class SettingsTab(ttk.Frame):
     # --- SAVE/LOAD ---
     def save_settings(self):
         # Cập nhật giá trị từ UI vào biến Global
-        config.global_settings["system"]["max_threads"] = self.var_threads.get()
-        config.global_settings["system"]["loop_limit"] = self.var_limit.get()
-        config.global_settings["system"]["max_retries"] = int(self.var_retries.get())
-        config.global_settings["system"]["wait_time"] = self.var_wait_time.get()
+        config.global_settings["system"]["max_threads"]     = self.var_threads.get()
+        config.global_settings["system"]["loop_limit"]      = self.var_limit.get()
+        config.global_settings["system"]["max_retries"]     = int(self.var_retries.get())
+        config.global_settings["system"]["max_stt_retries"] = int(self.var_stt_retries.get())
+        config.global_settings["system"]["wait_time"]       = self.var_wait_time.get()
         config.global_settings["system"]["aspect_ratio"] = self.var_aspect_ratio.get()
         config.global_settings["system"]["resolution"] = self.var_resolution.get()
 
@@ -279,6 +285,7 @@ class SettingsTab(ttk.Frame):
             self.var_threads.set(config.global_settings["system"]["max_threads"])
             self.var_limit.set(config.global_settings["system"]["loop_limit"])
             self.var_retries.set(config.global_settings["system"]["max_retries"])
+            self.var_stt_retries.set(config.global_settings["system"].get("max_stt_retries", 5))
             self.var_wait_time.set(config.global_settings["system"]["wait_time"])
             self.var_aspect_ratio.set(config.global_settings["system"].get("aspect_ratio", "16:9"))
             self.var_resolution.set(config.global_settings["system"].get("resolution", "720p"))

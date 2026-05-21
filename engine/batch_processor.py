@@ -18,6 +18,8 @@ class BatchProcessor:
         self.task_queue = queue.Queue()
         self.file_lock = threading.Lock()
         self.profile_health = {}
+        self.stt_fail_count = {}   # {stt_key: fail_count} — reset mỗi dự án
+        self.stt_skipped   = []    # STT bỏ qua vĩnh viễn trong dự án hiện tại
         
         self.current_monitoring_info = None 
 
@@ -49,7 +51,13 @@ class BatchProcessor:
             if self.stop_event.is_set():
                 self.update_status(idx, "Stopped 🛑")
             else:
-                self.update_status(idx, "Done ✅")
+                # Hiển thị STT bỏ qua vào cột Trạng thái
+                if self.stt_skipped:
+                    stts_disp = ", ".join(self.stt_skipped[:6])
+                    suffix    = f" +{len(self.stt_skipped)-6}" if len(self.stt_skipped) > 6 else ""
+                    self.update_status(idx, f"Done ✅ | ⛔ skip: {stts_disp}{suffix}")
+                else:
+                    self.update_status(idx, "Done ✅")
                 self.log(f"🏁 Xong dự án {idx+1}. Nghỉ 5s...", "SUCCESS")
                 time.sleep(5)
 
@@ -57,6 +65,8 @@ class BatchProcessor:
 
     def process_one_folder(self, inp, inp2, out, prompt, url, languages, loop_type, profiles, shuffle_gems):
         self.current_monitoring_info = (inp, inp2, out, loop_type, languages, shuffle_gems)
+        self.stt_fail_count = {}   # Reset cho mỗi dự án mới
+        self.stt_skipped    = []   # Reset danh sách STT bỏ qua
         
         self.clear_task_queue()
         self.log(f"🔍 Bắt đầu xử lý: {os.path.basename(inp)}", "INFO")
@@ -81,12 +91,21 @@ class BatchProcessor:
                     merge_videos_ffmpeg(inp, out, self.log)
                 break 
 
+            # Lọc bỏ STT đã bị skip vĩnh viễn khỏi danh sách chờ
+            if self.stt_skipped:
+                active_pending = [f for f in pending if str(f.get("STT", "")) not in self.stt_skipped]
+                if not active_pending:
+                    self.log(f"⛔ Tất cả STT còn lại đều đã bị bỏ qua vĩnh viễn. Kết thúc dự án.", "WARNING")
+                    break
+            else:
+                active_pending = pending
+
             living_profiles = [p for p in profiles if self.profile_health.get(p, 0) < config.global_settings["system"]["max_retries"]]
             if not living_profiles:
                 self.log("❌ Hết Profile sống!", "ERROR"); break
 
             while not self.task_queue.empty(): self.task_queue.get()
-            for f in pending: self.task_queue.put(f)
+            for f in active_pending: self.task_queue.put(f)
 
             cur_threads = min(config.global_settings["system"]["max_threads"], len(living_profiles))
             
@@ -132,12 +151,12 @@ class BatchProcessor:
                 stt_str = ", ".join(ranges)
                 self.log(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", "TECH")
                 self.log(f"  ⚠️  KHOẢNG TRỐNG CẦN XỬ LÝ", "WARNING")
-                self.log(f"  📁  Dự án  : {os.path.basename(inp)}", "TECH")
+                self.log(f"  📁  Dự án  : {os.path.basename(os.path.dirname(inp))}", "TECH")
                 self.log(f"  📌  STT thiếu : {stt_str}", "TECH")
                 self.log(f"  📊  Tổng cộng : {len(final_pending)} mục", "TECH")
                 self.log(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", "TECH")
             else:
-                self.log(f"✨ Dự án '{os.path.basename(inp)}' hoàn thành 100%!", "SUCCESS")
+                self.log(f"✨ Dự án '{os.path.basename(os.path.dirname(inp))}' hoàn thành 100%!", "SUCCESS")
         except Exception as e:
             self.log(f"⚠️ Không kiểm tra được trạng thái cuối: {e}", "WARNING")
 
@@ -187,18 +206,38 @@ class BatchProcessor:
             )
 
             if failed_items:
-                self.log(f"♻️ [{profile_name}] Retry {len(failed_items)} items.", "WARNING")
+                MAX_STT_FAILS = config.global_settings.get("system", {}).get("max_stt_retries", 5)
+                retry_items = []
                 with self.file_lock:
-                    for item in failed_items: self.task_queue.put(item) 
+                    for item in failed_items:
+                        stt = str(item.get("STT", id(item)))
+                        self.stt_fail_count[stt] = self.stt_fail_count.get(stt, 0) + 1
+                        if self.stt_fail_count[stt] >= MAX_STT_FAILS:
+                            if stt not in self.stt_skipped:
+                                self.stt_skipped.append(stt)  # Track cho cột Trạng thái
+                            self.log(
+                                f"⛔ STT {stt} bỏ qua vĩnh viễn "
+                                f"(fail {self.stt_fail_count[stt]}/{MAX_STT_FAILS} lần — có thể do chính sách nội dung)",
+                                "WARNING"
+                            )
+                        else:
+                            retry_items.append(item)
+                    for item in retry_items:
+                        self.task_queue.put(item)
+                if retry_items:
+                    self.log(f"♻️ [{profile_name}] Retry {len(retry_items)} items.", "WARNING")
 
             if is_healthy: self.profile_health[profile_name] = 0 
             else: self.profile_health[profile_name] += 1
 
     def monitor_loop(self, update_ui_callback):
+        last_info = None   # cache để dùng cho final scan
+
         while not self.stop_event.is_set():
             if self.current_monitoring_info:
+                last_info = self.current_monitoring_info   # ← luôn giữ bản mới nhất
                 try:
-                    inp, inp2, out, loop_type, languages, shuffle_gems = self.current_monitoring_info
+                    inp, inp2, out, loop_type, languages, shuffle_gems = last_info
                     
                     match loop_type:
                         case "srt_prompt":
@@ -219,3 +258,24 @@ class BatchProcessor:
                     print(f"Monitor Error: {e}")
             
             time.sleep(2)
+
+        # Final scan sau Stop — dùng last_info đã cache, không sợ race condition
+        if last_info:
+            try:
+                inp, inp2, out, loop_type, languages, shuffle_gems = last_info
+                match loop_type:
+                    case "srt_prompt":
+                        pending, completed = get_srt_prompt_status(inp, out)
+                    case "prompt_image":
+                        pending, completed = get_prompt_image_status(inp, out)
+                    case "1_image_prompt_video":
+                        pending, completed = get_1_image_prompt_video_status(inp, inp2, out)
+                    case "stretch_video":
+                        pending, completed = get_stretch_video_status(inp, inp2, out)
+                    case _:
+                        pending, completed = [], []
+                t = len(pending) + len(completed)
+                update_ui_callback(t, len(pending), len(completed))
+            except Exception as e:
+                print(f"Monitor Final Scan Error: {e}")
+
