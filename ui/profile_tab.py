@@ -4,8 +4,10 @@ import os
 import shutil
 import threading
 import time
+import json
 
-from engine.browser  import init_driver_from_profile
+import asyncio
+from engine.browser_ix  import init_driver_from_profile_playwright
 
 class ProfileManagerTab(ttk.Frame):
     def __init__(self, parent, profiles_dir):
@@ -23,6 +25,69 @@ class ProfileManagerTab(ttk.Frame):
         self.setup_ui()
         self.refresh_list()
 
+    # -------------------------------------------------------
+    # Proxy Map helpers
+    # -------------------------------------------------------
+    def import_proxy_list(self):
+        """Import file .txt chứa danh sách proxy, gán xoay vòng vào profiles"""
+        filepath = filedialog.askopenfilename(
+            title="Chon file proxy (.txt)",
+            filetypes=[("Text files", "*.txt"), ("All files", "*.*")]
+        )
+        if not filepath:
+            return
+
+        try:
+            with open(filepath, "r", encoding="utf-8") as f:
+                lines = f.read().splitlines()
+        except Exception as e:
+            messagebox.showerror("Loi", f"Khong doc duoc file: {e}")
+            return
+
+        proxies = [line.strip() for line in lines if line.strip()]
+        if not proxies:
+            messagebox.showwarning("Canh bao", "File khong co proxy nao hop le!")
+            return
+
+        if not os.path.exists(self.profiles_dir):
+            messagebox.showwarning("Canh bao", "Chua co profile nao!")
+            return
+
+        profiles = sorted([
+            f for f in os.listdir(self.profiles_dir)
+            if os.path.isdir(os.path.join(self.profiles_dir, f))
+        ])
+
+        if not profiles:
+            messagebox.showwarning("Canh bao", "Chua co profile nao!")
+            return
+
+        # Gan proxy xoay vong: profiles[i] <- proxies[i % len(proxies)]
+        proxy_map = self._load_proxy_map()
+        for i, profile in enumerate(profiles):
+            proxy_map[profile] = proxies[i % len(proxies)]
+
+        self._save_proxy_map(proxy_map)
+        self.refresh_list()
+
+    def _load_proxy_map(self):
+        """Đọc proxy_map.json từ thư mục profiles"""
+        path = os.path.join(self.profiles_dir, "proxy_map.json")
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except:
+            return {}
+
+    def _save_proxy_map(self, proxy_map):
+        """Ghi proxy_map.json"""
+        path = os.path.join(self.profiles_dir, "proxy_map.json")
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(proxy_map, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            print(f"Khong luu duoc proxy_map: {e}")
+
     def setup_ui(self):
         # === 1. TOOLBAR (TOP BAR) ===
         frame_top = ttk.Frame(self, padding=10)
@@ -38,6 +103,7 @@ class ProfileManagerTab(ttk.Frame):
         # Select All / Refresh Buttons
         ttk.Button(frame_top, text="☑️ Select All", command=self.select_all).pack(side="right", padx=5)
         ttk.Button(frame_top, text="🔄 Refresh", command=self.refresh_list).pack(side="right", padx=5)
+        ttk.Button(frame_top, text="📥 Proxy List", command=self.import_proxy_list).pack(side="right", padx=5)
 
         ttk.Separator(self, orient="horizontal").pack(fill="x")
 
@@ -87,13 +153,11 @@ class ProfileManagerTab(ttk.Frame):
         card = ttk.LabelFrame(self.scrollable_frame, padding=(5, 5))
         card.pack(fill="x", expand=True, padx=10, pady=2, anchor="n")
 
-        # --- [IMPORTANT] PROFILE SELECTION CHECKBOX ---
-        var = tk.BooleanVar(value=True) # Default checked
-        self.profile_vars[profile_name] = var # Save to dict for Main to access
-        
+        # --- PROFILE SELECTION CHECKBOX ---
+        var = tk.BooleanVar(value=True)
+        self.profile_vars[profile_name] = var
         chk = ttk.Checkbutton(card, variable=var)
         chk.pack(side="left", padx=5)
-        # ----------------------------------------------
 
         # Icon & Name
         lbl_icon = ttk.Label(card, text="👤", font=("Segoe UI", 12))
@@ -102,24 +166,55 @@ class ProfileManagerTab(ttk.Frame):
         lbl_name = ttk.Label(card, text=profile_name, font=("Segoe UI", 10, "bold"))
         lbl_name.pack(side="left", padx=5)
 
-        # Action Buttons
-        # Delete Button
+        # --- RIGHT SIDE: pack buttons first so they claim right space ---
         btn_del = ttk.Button(card, text="🗑️", width=3, command=lambda p=profile_name: self.delete_profile(p))
         btn_del.pack(side="right", padx=2)
 
-        # Setup Button
         btn_setup = ttk.Button(
-            card, 
-            text="⚙️ Setup", 
-            style="Accent.TButton", 
+            card,
+            text="⚙️ Setup",
+            style="Accent.TButton",
             command=lambda p=profile_name: self.open_browser_setup(p)
         )
         btn_setup.pack(side="right", padx=2)
-        
-        # Display Size
+
+        # Display Size (thread)
         path = os.path.join(self.profiles_dir, profile_name)
-        # Run size calculation in thread to avoid UI freeze if many profiles
         threading.Thread(target=self._update_size_label, args=(path, card), daemon=True).start()
+
+        # --- PROXY ENTRY (middle, fills remaining space) ---
+        proxy_map     = self._load_proxy_map()
+        current_proxy = proxy_map.get(profile_name, "")
+
+        entry_proxy = ttk.Entry(card, width=28)
+        if current_proxy:
+            entry_proxy.insert(0, current_proxy)
+            entry_proxy.config(foreground="white")
+        else:
+            entry_proxy.insert(0, "host:port:user:pass")
+            entry_proxy.config(foreground="#888")
+        entry_proxy.pack(side="left", fill="x", expand=True, padx=(10, 5))
+
+        def _focus_in(e):
+            if entry_proxy.get() == "host:port:user:pass":
+                entry_proxy.delete(0, tk.END)
+                entry_proxy.config(foreground="white")
+
+        def _focus_out(e):
+            val = entry_proxy.get().strip()
+            pm  = self._load_proxy_map()
+            if not val or val == "host:port:user:pass":
+                entry_proxy.delete(0, tk.END)
+                entry_proxy.insert(0, "host:port:user:pass")
+                entry_proxy.config(foreground="#888")
+                pm.pop(profile_name, None)
+            else:
+                entry_proxy.config(foreground="white")
+                pm[profile_name] = val
+            self._save_proxy_map(pm)
+
+        entry_proxy.bind("<FocusIn>",  _focus_in)
+        entry_proxy.bind("<FocusOut>", _focus_out)
 
     def _update_size_label(self, path, card_frame):
         """Calculate folder size and update label (Thread safe way)"""
@@ -203,34 +298,36 @@ class ProfileManagerTab(ttk.Frame):
                 messagebox.showerror("Error", f"Cannot delete: {e}")
 
     def open_browser_setup(self, profile_name):
-        if init_driver_from_profile is None:
-             messagebox.showerror("Error", "Browser setup logic not found (Import failed).")
-             return
-
         profile_path = os.path.join(self.profiles_dir, profile_name)
-        
-        def run_browser():
+
+        async def _run_async():
             print(f"Opening Setup for {profile_name}...")
-            driver = init_driver_from_profile(profile_path, log_callback=print)
-            
-            if driver:
-                try:
-                    driver.get("https://gemini.google.com")
-                    # Loop to keep browser open
-                    while True:
-                        try:
-                            _ = driver.title 
-                            time.sleep(1)
-                        except:
+            context = await init_driver_from_profile_playwright(profile_path, log_callback=print)
+            if not context:
+                print("Failed to open browser")
+                return
+            try:
+                page = await context.new_page()
+                await page.goto("https://gemini.google.com")
+                # Giữ browser mở cho đến khi user đóng tất cả tab
+                while True:
+                    try:
+                        if not context.pages:
                             break
-                    print(f"Setup {profile_name} closed.")
-                except Exception as e:
-                    print(f"Browser Error: {e}")
-                finally:
-                    try: driver.quit()
-                    except: pass
-            else:
-                print("Failed to open driver")
+                        await asyncio.sleep(1)
+                    except:
+                        break
+                print(f"Setup {profile_name} closed.")
+            except Exception as e:
+                print(f"Browser Error: {e}")
+            finally:
+                try:
+                    await context.close()
+                    await context.playwright_instance.stop()
+                except: pass
+
+        def run_browser():
+            asyncio.run(_run_async())
 
         threading.Thread(target=run_browser, daemon=True).start()
 

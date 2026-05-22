@@ -3,6 +3,7 @@ import threading
 import shutil
 import undetected_chromedriver as uc
 import json
+from playwright.async_api import async_playwright
 
 # ==========================================
 # CẤU HÌNH ĐƯỜNG DẪN IXBROWSER CORE
@@ -94,10 +95,11 @@ def clean_chrome_cache(profile_path):
     """
     Dọn dẹp rác cache để trình duyệt nhẹ hơn
     """
-    root_garbage = ["Crashpad", "Safe Browsing", "GrShaderCache", "ShaderCache"]
+    root_garbage = ["Crashpad", "Safe Browsing", "GrShaderCache", "ShaderCache", "GraphiteDawnCache"]
     default_dir = os.path.join(profile_path, "Default")
     default_garbage = [
-        "Cache", "Code Cache", "GPUCache", "DawnCache", 
+        "Cache", "Code Cache", "GPUCache", "DawnCache",
+        "DawnGraphiteCache", "DawnWebGPUCache",
         "Service Worker", "File System", "IndexedDB", "Trace"
     ]
 
@@ -146,9 +148,21 @@ def clean_preferences_bloat(profile_path):
         print(f"⚠️ Lỗi nhẹ khi dọn Preferences: {e}")
 
 
+def _load_proxy_from_map(profile_folder_path):
+    """Đọc proxy từ proxy_map.json theo profile_id (ưu tiên hơn proxy.txt)"""
+    profile_id   = os.path.basename(profile_folder_path)
+    profiles_dir = os.path.dirname(profile_folder_path)
+    proxy_map_path = os.path.join(profiles_dir, "proxy_map.json")
+    try:
+        with open(proxy_map_path, "r", encoding="utf-8") as f:
+            return json.load(f).get(profile_id, "")
+    except:
+        return ""
+
+
 def init_driver_from_profile(profile_folder_path, log_callback=print):
     """
-    Hàm khởi tạo Driver dành riêng cho profile của ixBrowser (Offline Mode)
+    Hàm khởi tạo Driver Selenium dành riêng cho profile ixBrowser (dùng cho Setup button).
     """
     if not os.path.exists(profile_folder_path):
         os.makedirs(profile_folder_path, exist_ok=True)
@@ -185,19 +199,27 @@ def init_driver_from_profile(profile_folder_path, log_callback=print):
     
     options.page_load_strategy = 'eager'
 
-    # --- TỰ ĐỘNG GẮN PROXY TỪ FILE proxy.txt ---
-    proxy_txt_path = os.path.join(profile_folder_path, "proxy.txt")
-    if os.path.exists(proxy_txt_path):
+    # --- GẮN PROXY: ưu tiên proxy_map.json, fallback proxy.txt ---
+    proxy_str = _load_proxy_from_map(profile_folder_path)
+
+    if not proxy_str:
+        proxy_txt_path = os.path.join(profile_folder_path, "proxy.txt")
+        if os.path.exists(proxy_txt_path):
+            try:
+                with open(proxy_txt_path, "r", encoding="utf-8") as f:
+                    proxy_str = f.read().strip()
+            except Exception as e:
+                log_callback(f"⚠️ Không thể đọc proxy.txt: {e}")
+
+    if proxy_str:
         try:
-            with open(proxy_txt_path, "r", encoding="utf-8") as f:
-                proxy_str = f.read().strip()
-            if proxy_str:
-                ext_path = create_proxy_extension(proxy_str, profile_folder_path)
-                if ext_path:
-                    options.add_argument(f"--load-extension={ext_path}")
-                    log_callback(f"🌐 Đã gắn Proxy ảo từ file proxy.txt")
+            ext_path = create_proxy_extension(proxy_str, profile_folder_path)
+            if ext_path:
+                options.add_argument(f"--load-extension={ext_path}")
+                host_display = proxy_str.split(":")[0]
+                log_callback(f"🌐 Đã gắn Proxy: {host_display}:***")
         except Exception as e:
-            log_callback(f"⚠️ Không thể đọc/gắn proxy.txt: {e}")
+            log_callback(f"⚠️ Không thể gắn proxy: {e}")
 
     # --- TẠO THƯ MỤC DOWNLOADS ---
     profile_dl_dir = os.path.join(profile_folder_path, "Downloads")
@@ -243,3 +265,89 @@ def init_driver_from_profile(profile_folder_path, log_callback=print):
         except Exception as e:
             log_callback(f"❌ Lỗi khởi tạo ixBrowser ({folder_name}): {e}")
             return None
+
+async def init_driver_from_profile_playwright(profile_folder_path, log_callback=print):
+    """
+    Hàm Playwright ASYNC khởi tạo ixBrowser — dùng cho batch processing.
+    Tương thích 100% với worker.py (thay thế browser_playright.py).
+    Hỗ trợ proxy tự động từ proxy_map.json.
+    """
+    if not os.path.exists(profile_folder_path):
+        os.makedirs(profile_folder_path, exist_ok=True)
+        log_callback(f"⚠️ Folder chưa tồn tại, đã tạo mới: {profile_folder_path}")
+
+    folder_name = os.path.basename(profile_folder_path)
+
+    log_callback(f"🧹 Đang dọn dẹp Cache cũ cho profile ixBrowser: {folder_name}...")
+    clean_preferences_bloat(profile_folder_path)
+    clean_chrome_cache(profile_folder_path)
+
+    log_callback(f"🚀 Khởi động ixBrowser Profile bằng Playwright: {folder_name}")
+
+    profile_dl_dir = os.path.join(profile_folder_path, "Downloads")
+    if os.path.exists(profile_dl_dir):
+        try: shutil.rmtree(profile_dl_dir)
+        except: pass
+    os.makedirs(profile_dl_dir, exist_ok=True)
+
+    chrome_args = [
+        "--disable-blink-features=AutomationControlled",
+        "--disable-backgrounding-occluded-windows",
+        "--disable-background-timer-throttling",
+        "--disable-renderer-backgrounding",
+        "--disable-client-side-phishing-detection",
+        "--no-first-run",
+        "--no-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-popup-blocking",
+        "--disk-cache-size=1",
+        "--media-cache-size=1",
+        "--disable-application-cache",
+        "--disable-gpu-shader-disk-cache",
+        "--ash-no-nudges",
+    ]
+
+    # --- Đọc proxy từ proxy_map.json ---
+    proxy_config = None
+    proxy_str = _load_proxy_from_map(profile_folder_path)
+    if not proxy_str:
+        proxy_txt = os.path.join(profile_folder_path, "proxy.txt")
+        if os.path.exists(proxy_txt):
+            try:
+                with open(proxy_txt, "r", encoding="utf-8") as f:
+                    proxy_str = f.read().strip()
+            except: pass
+
+    if proxy_str:
+        parts = proxy_str.strip().split(":")
+        if len(parts) == 4:
+            host, port, user, pw = parts
+            proxy_config = {"server": f"http://{host}:{port}", "username": user, "password": pw}
+        elif len(parts) == 2:
+            host, port = parts
+            proxy_config = {"server": f"http://{host}:{port}"}
+        if proxy_config:
+            log_callback(f"🌐 Đã gắn Proxy: {parts[0]}:***")
+
+    try:
+        p = await async_playwright().start()
+        launch_kwargs = dict(
+            user_data_dir=profile_folder_path,
+            executable_path=IXBROWSER_EXE_PATH,
+            headless=False,
+            args=chrome_args,
+            no_viewport=True,
+            accept_downloads=True,
+            downloads_path=profile_dl_dir,
+        )
+        if proxy_config:
+            launch_kwargs["proxy"] = proxy_config
+
+        context = await p.chromium.launch_persistent_context(**launch_kwargs)
+        context.my_download_dir = profile_folder_path
+        context.playwright_instance = p
+        return context
+
+    except Exception as e:
+        log_callback(f"❌ Lỗi khởi tạo ixBrowser Playwright ({folder_name}): {e}")
+        return None
