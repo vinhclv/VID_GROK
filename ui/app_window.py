@@ -23,6 +23,7 @@ class BatchApp:
         self.root = root
         self.root.title("🚀 Batch Auto Tool Pro - Realtime Dashboard")
         self.root.geometry("1100x900")
+        self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         
         try: sv_ttk.set_theme("dark")
         except: pass
@@ -40,7 +41,11 @@ class BatchApp:
         self.notebook.add(self.tab_dashboard, text="📂 Danh sách Dự án")
         
         # TAB 2: Profiles
-        self.tab_profiles = ProfileManagerTab(self.notebook, PROFILES_DIR) 
+        self.tab_profiles = ProfileManagerTab(
+            self.notebook,
+            PROFILES_DIR,
+            kill_callback=self._on_kill_profile
+        )
         self.notebook.add(self.tab_profiles, text="👥 Quản lý Profiles")
 
         # TAB 3: Settings
@@ -146,13 +151,20 @@ class BatchApp:
         )
         t_main.start()
 
-        # 6. Chạy luồng Monitor
+        # 6. Chạy luồng Monitor (đảm bảo cập nhật UI trên main thread bằng after)
         t_monitor = threading.Thread(
             target=self.processor.monitor_loop,
-            args=(self.tab_dashboard.update_dashboard_stats,),
+            args=(self.update_dashboard_stats_safe,),
             daemon=True
         )
         t_monitor.start()
+
+    def _on_kill_profile(self, profile_name):
+        """Callback từ Profile Tab khi user click ☠️"""
+        if self.is_running and hasattr(self, 'processor'):
+            self.processor.kill_profile_now(profile_name)
+        else:
+            self.log(f"⚠️ Kill '{profile_name}': Không có batch nào đang chạy.", "WARNING")
 
     def stop_process(self):
         if self.is_running:
@@ -171,8 +183,26 @@ class BatchApp:
         else:
              self.log("🛑 Đã dừng theo yêu cầu.", "WARNING")
 
+    def on_close(self):
+        self.stop_event.set()
+        try:
+            self.root.destroy()
+        except Exception:
+            pass
+
+    def update_dashboard_stats_safe(self, total, pending, done):
+        try:
+            if self.root.winfo_exists():
+                self.root.after(0, lambda: self.tab_dashboard.update_dashboard_stats(total, pending, done))
+        except Exception:
+            pass
+
     def update_project_status_callback(self, index, status):
-        self.root.after(0, lambda: self.tab_dashboard.update_project_status(index, status))
+        try:
+            if self.root.winfo_exists():
+                self.root.after(0, lambda: self.tab_dashboard.update_project_status(index, status))
+        except Exception:
+            pass
 
     def _config_log_tags(self):
         self.log_area.tag_config("INFO", foreground="#cccccc")
@@ -186,9 +216,17 @@ class BatchApp:
         full_msg = f"[{ts}] {message}\n"
         
         def _u():
-            self.log_area.config(state='normal')
-            self.log_area.insert(tk.END, full_msg, tag)
-            self.log_area.see(tk.END)
-            self.log_area.config(state='disabled')
+            try:
+                if not self.root.winfo_exists(): return
+                self.log_area.config(state='normal')
+                self.log_area.insert(tk.END, full_msg, tag)
+                self.log_area.see(tk.END)
+                self.log_area.config(state='disabled')
+            except Exception:
+                pass
             
-        self.root.after(0, _u)
+        try:
+            if self.root.winfo_exists():
+                self.root.after(0, _u)
+        except Exception:
+            pass

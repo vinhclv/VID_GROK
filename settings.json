@@ -4,8 +4,8 @@
         "loop_limit": 2,
         "max_retries": 10,
         "max_stt_retries": 1,
-        "wait_time": 1,
-        "aspect_ratio": "16:9",
+        "wait_time": 30,
+        "aspect_ratio": "9:16",
         "resolution": "480p"
     },
     "urls": {

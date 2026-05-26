@@ -10,9 +10,10 @@ import asyncio
 from engine.browser_ix  import init_driver_from_profile_playwright
 
 class ProfileManagerTab(ttk.Frame):
-    def __init__(self, parent, profiles_dir):
+    def __init__(self, parent, profiles_dir, kill_callback=None):
         super().__init__(parent)
         self.profiles_dir = profiles_dir
+        self.kill_callback = kill_callback  # fn(profile_name)
         
         # Ensure profiles directory exists
         if not os.path.exists(self.profiles_dir):
@@ -170,6 +171,21 @@ class ProfileManagerTab(ttk.Frame):
         btn_del = ttk.Button(card, text="🗑️", width=3, command=lambda p=profile_name: self.delete_profile(p))
         btn_del.pack(side="right", padx=2)
 
+        # Kill button
+        def _on_kill(p=profile_name, lbl=lbl_name, _card=card):
+            if self.kill_callback:
+                self.kill_callback(p)
+            else:
+                print(f"Kill: Khong co batch dang chay")
+            # Visual: ten do + button chuyen sang ky hieu chet + disable
+            try:
+                lbl.config(foreground="#ff5555")
+                btn_kill.config(text="💀", state="disabled")
+            except: pass
+
+        btn_kill = ttk.Button(card, text="☠️", width=3, command=_on_kill)
+        btn_kill.pack(side="right", padx=2)
+
         btn_setup = ttk.Button(
             card,
             text="⚙️ Setup",
@@ -275,16 +291,23 @@ class ProfileManagerTab(ttk.Frame):
         dest_path = os.path.join(self.profiles_dir, folder_name)
 
         if os.path.exists(dest_path):
-            messagebox.showerror("Error", f"Profile '{folder_name}' already exists! Please rename original folder.")
-            return
+            try:
+                shutil.rmtree(dest_path)
+            except Exception as e:
+                messagebox.showerror("Lỗi", f"Không xóa được bản cũ: {e}")
+                return
 
         try:
             def copy_task():
                 shutil.copytree(source_dir, dest_path)
-                self.after(0, lambda: [messagebox.showinfo("Done", "Import successful!"), self.refresh_list()])
+                # Xóa file Local State của ixBrowser cũ ngay khi import để tránh crash
+                local_state_path = os.path.join(dest_path, "Local State")
+                if os.path.exists(local_state_path):
+                    try: os.remove(local_state_path)
+                    except: pass
+                self.after(0, self.refresh_list)
             
             threading.Thread(target=copy_task, daemon=True).start()
-            messagebox.showinfo("Notice", "Copying data... Please wait.")
         except Exception as e:
             messagebox.showerror("Import Error", str(e))
 
@@ -307,6 +330,23 @@ class ProfileManagerTab(ttk.Frame):
                 print("Failed to open browser")
                 return
             try:
+                # Tab 1: hiện tên profile làm title (tận dụng trang trống đầu tiên của Playwright)
+                if context.pages:
+                    info_page = context.pages[0]
+                else:
+                    info_page = await context.new_page()
+                
+                short_name = profile_name[:16] + "..." if len(profile_name) > 16 else profile_name
+                await info_page.set_content(f"""<!DOCTYPE html>
+<html><head><title>[{short_name}]</title></head>
+<body style="margin:0;background:#0f172a;display:flex;align-items:center;
+justify-content:center;height:100vh;font-family:monospace;color:#60a5fa">
+<div style="text-align:center;padding:20px;word-break:break-all;max-width:400px">
+{profile_name}
+</div>
+</body></html>""")
+
+                # Tab 2: mở gemini để setup      
                 page = await context.new_page()
                 await page.goto("https://gemini.google.com")
                 # Giữ browser mở cho đến khi user đóng tất cả tab

@@ -175,7 +175,7 @@ async def process_1_image_video_batch(page: Page, file_batch: list, output_folde
         page.grok_video_results = {}
         async def on_response(response):
             try:
-                if "rest/app-chat/conversations/new" in response.url and response.request.method == "POST":
+                if ("rest/app-chat/conversations/new" in response.url or "/messages/new" in response.url) and response.request.method == "POST":
                     post_data = response.request.post_data
                     if post_data:
                         match_stt = re.search(r'\|\|(.*?)\|\|', post_data)

@@ -26,6 +26,14 @@ class BatchProcessor:
     def clear_task_queue(self):
         with self.task_queue.mutex:
             self.task_queue.queue.clear()
+
+    def kill_profile_now(self, profile_name):
+        """Force-dead profile trong run hiện tại.
+        Runner tự return sau task hiện tại nhờ kiểm tra profile_health.
+        Reset về alive khi Start run mới."""
+        max_r = config.global_settings["system"]["max_retries"]
+        self.profile_health[profile_name] = max_r + 999
+        self.log(f"☠️ Profile '{profile_name}' bị kill. Sẽ dừng sau task hiện tại.", "ERROR")
  
     def run_batch_logic(self, project_queue, loop_type, profiles, finished_callback):
         self.profile_health = {p: 0 for p in profiles}
@@ -76,7 +84,7 @@ class BatchProcessor:
                 case "srt_prompt":
                     pending, _ = get_srt_prompt_status(inp, out)
                 case "prompt_image":
-                    pending, _ = get_prompt_image_status(inp, out)
+                    pending, _ = get_prompt_image_status(inp, inp2, out)
                 case "1_image_prompt_video":
                     pending, _ = get_1_image_prompt_video_status(inp, inp2, out)
                 case "stretch_video":
@@ -128,7 +136,7 @@ class BatchProcessor:
                 case "srt_prompt":
                     final_pending, _ = get_srt_prompt_status(inp, out)
                 case "prompt_image":
-                    final_pending, _ = get_prompt_image_status(inp, out)
+                    final_pending, _ = get_prompt_image_status(inp, inp2, out)
                 case "1_image_prompt_video":
                     final_pending, _ = get_1_image_prompt_video_status(inp, inp2, out)
                 case "stretch_video":
@@ -184,8 +192,9 @@ class BatchProcessor:
                         actual_pending, _ = get_srt_prompt_status(inp_path, out_path)
                         batch = actual_pending # Ném cả file vào luôn vì srt rất nhỏ
                     case "prompt_image":
-                        actual_pending, _ = get_prompt_image_status(inp_path, out_path)
-                        batch = [item for item in candidates if item in actual_pending]
+                        actual_pending, _ = get_prompt_image_status(inp_path, inp2_path, out_path)
+                        ap_stts = [i.get("STT") for i in actual_pending]
+                        batch = [item for item in candidates if isinstance(item, dict) and item.get("STT") in ap_stts]
                     case "1_image_prompt_video":
                         actual_pending, _ = get_1_image_prompt_video_status(inp_path, inp2_path, out_path)
                         ap_stts = [i.get("STT") for i in actual_pending]
@@ -243,7 +252,7 @@ class BatchProcessor:
                         case "srt_prompt":
                             pending, completed = get_srt_prompt_status(inp, out)
                         case "prompt_image":
-                            pending, completed = get_prompt_image_status(inp, out)
+                            pending, completed = get_prompt_image_status(inp, inp2, out)
                         case "1_image_prompt_video":
                             pending, completed = get_1_image_prompt_video_status(inp, inp2, out)
                         case "stretch_video":
@@ -267,7 +276,7 @@ class BatchProcessor:
                     case "srt_prompt":
                         pending, completed = get_srt_prompt_status(inp, out)
                     case "prompt_image":
-                        pending, completed = get_prompt_image_status(inp, out)
+                        pending, completed = get_prompt_image_status(inp, inp2, out)
                     case "1_image_prompt_video":
                         pending, completed = get_1_image_prompt_video_status(inp, inp2, out)
                     case "stretch_video":

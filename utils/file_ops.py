@@ -63,58 +63,64 @@ def get_srt_prompt_status(srt_path, output_dir):
         
     return pending, completed
 
-def get_prompt_image_status(prompt_json_path, output_root_dir):
+def get_prompt_image_status(json_path, img_dir, out_dir):
     """
-    Đọc file input .json (chứa Prompt).
-    Kiểm tra xem file ảnh tương ứng (STT.jpg) đã tồn tại trong thư mục output chưa.
-    
-    Ví dụ: 
-    - Input: data/movie.json
-    - Output folder: output_root_dir/movie/
-    - Item STT=1 -> Check file: output_root_dir/movie/1.jpg
+    Đọc file JSON và đối chiếu với thư mục ảnh đầu ra out_dir,
+    đồng thời nạp các ảnh tham chiếu trong thư mục img_dir (nếu có).
     """
     pending = []
     completed = []
     
-    if not os.path.exists(prompt_json_path):
+    if not os.path.exists(json_path):
         return [], []
-
+        
     try:
-        # 1. Đọc nội dung JSON Input
-        with open(prompt_json_path, 'r', encoding='utf-8') as f:
+        with open(json_path, 'r', encoding='utf-8') as f:
             data = json.load(f)
-
-
-        # 3. Duyệt qua từng item
+            
         for item in data:
-            # Lấy STT và Prompt (ép kiểu str để an toàn)
-            idx = str(item.get("STT", "")).strip()
-            prompt_text = item.get("Prompt", "").strip() # Hoặc key là "text" tùy file json của bạn
-
-            if not idx: continue # Bỏ qua nếu data lỗi không có STT
-
-            # Đường dẫn file ảnh mong đợi
-            # (Bạn có thể đổi thành .png nếu tool sinh ra png)
-            image_filename = f"{idx}.jpg"
-            image_path = os.path.join(output_root_dir, image_filename)
-
-            # Tạo object task
+            stt = str(item.get("STT", "")).strip()
+            if not stt:
+                continue
+                
+            prompt_text = item.get("prompt", item.get("Prompt", "")).strip()
+            characters_str = item.get("character", "").strip()
+            
+            expected_image_path = os.path.join(out_dir, f"{stt}.jpg")
+            
+            image_paths = []
+            skip_item = False
+            if characters_str and characters_str != "0":
+                chars = [c.strip() for c in characters_str.split(',')]
+                for c in chars:
+                    if not c: continue
+                    img_p = os.path.join(img_dir, f"{c}.jpg")
+                    if not os.path.exists(img_p):
+                        img_p = os.path.join(img_dir, f"{c}.png")
+                    if not os.path.exists(img_p):
+                        skip_item = True
+                        break
+                    image_paths.append(img_p)
+                    
+            if skip_item:
+                continue
+                
             task_item = {
-                "id": idx,
+                "STT": stt,
                 "prompt": prompt_text,
-                "save_path": image_path, # Đường dẫn lưu ảnh để Worker dùng
-                "output_folder": output_root_dir,
+                "image_paths": image_paths,
+                "save_path": expected_image_path,
+                "output_folder": out_dir,
                 "type": "prompt_to_image"
             }
-
-            # 4. Kiểm tra file ảnh có tồn tại và có dung lượng > 0
-            if os.path.exists(image_path) and os.path.getsize(image_path) > 0:
+            
+            if os.path.exists(expected_image_path) and os.path.getsize(expected_image_path) > 0:
                 completed.append(task_item)
             else:
                 pending.append(task_item)
-
+                
     except Exception as e:
-        print(f"❌ Lỗi đọc JSON Prompt Image: {e}")
+        print(f"❌ Lỗi quét prompt_image: {e}")
         
     return pending, completed
 
