@@ -20,10 +20,15 @@ def run_worker_task(profile_folder, batch, task_type, assets_path, prompt, url, 
 
     task_log(f"🚀 Khởi động (Task: {task_type})...")
 
-    # --- NẾU LÀ STRETCH VIDEO: CHẠY LOCAL FFMPEG VÀ RETURN LUÔN ---
+    # --- NẾU LÀ STRETCH VIDEO HOẶC IMAGE TO VIDEO: CHẠY LOCAL FFMPEG VÀ RETURN LUÔN ---
     if task_type == "stretch_video":
         from utils.stretch_video import handle_stretch_video
         is_healthy, failed_items = handle_stretch_video(batch, assets_path, task_log)
+        return is_healthy, failed_items
+
+    if task_type == "image_to_video":
+        from utils.stretch_video import handle_image_to_video
+        is_healthy, failed_items = handle_image_to_video(batch, assets_path, task_log)
         return is_healthy, failed_items
 
     # --- NẾU LÀ CÁC TÁC VỤ DUYỆT WEB: CHẠY PLAYWRIGHT VÀ RETURN LUÔN ---

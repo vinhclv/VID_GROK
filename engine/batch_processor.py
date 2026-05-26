@@ -6,7 +6,13 @@ import os
 import concurrent.futures
 
 from config import DEFAULT_PROFILES
-from utils.file_ops import get_srt_prompt_status, get_prompt_image_status, get_1_image_prompt_video_status, get_stretch_video_status
+from utils.file_ops import (
+    get_srt_prompt_status,
+    get_prompt_image_status,
+    get_1_image_prompt_video_status,
+    get_stretch_video_status,
+    get_image_to_video_status
+)
 from engine.worker import run_worker_task
 import config
 class BatchProcessor:
@@ -43,6 +49,10 @@ class BatchProcessor:
         for idx, project in enumerate(project_queue):
             if self.stop_event.is_set(): break
             
+            # Bỏ qua dự án nếu đã bị đánh dấu lỗi hoặc skip ở bước kiểm tra trước
+            if project.get("status", "Waiting") in ["Failed ❌", "Skipped ⏭️"]:
+                continue
+                
             input_path = project["input"]
             input2_path = project.get("input2", "")
             output_path = project["output"]
@@ -89,12 +99,14 @@ class BatchProcessor:
                     pending, _ = get_1_image_prompt_video_status(inp, inp2, out)
                 case "stretch_video":
                     pending, _ = get_stretch_video_status(inp, inp2, out)
+                case "image_to_video":
+                    pending, _ = get_image_to_video_status(inp, inp2, out)
                 case _:
                     pending, _ = [], []
 
             if not pending:
                 self.log(f"✅ Dự án {os.path.basename(inp)} hoàn thành!", "SUCCESS")
-                if loop_type == "stretch_video":
+                if loop_type in ["stretch_video", "image_to_video"]:
                     from utils.stretch_video import merge_videos_ffmpeg
                     merge_videos_ffmpeg(inp, out, self.log)
                 break 
@@ -141,6 +153,8 @@ class BatchProcessor:
                     final_pending, _ = get_1_image_prompt_video_status(inp, inp2, out)
                 case "stretch_video":
                     final_pending, _ = get_stretch_video_status(inp, inp2, out)
+                case "image_to_video":
+                    final_pending, _ = get_image_to_video_status(inp, inp2, out)
                 case _:
                     final_pending = []
 
@@ -203,6 +217,10 @@ class BatchProcessor:
                         actual_pending, _ = get_stretch_video_status(inp_path, inp2_path, out_path)
                         ap_stts = [i.get("STT") for i in actual_pending]
                         batch = [item for item in candidates if isinstance(item, dict) and item.get("STT") in ap_stts]
+                    case "image_to_video":
+                        actual_pending, _ = get_image_to_video_status(inp_path, inp2_path, out_path)
+                        ap_stts = [i.get("STT") for i in actual_pending]
+                        batch = [item for item in candidates if isinstance(item, dict) and item.get("STT") in ap_stts]
                     case _:
                         actual_pending, _ = [], []
                         batch = []
@@ -257,6 +275,8 @@ class BatchProcessor:
                             pending, completed = get_1_image_prompt_video_status(inp, inp2, out)
                         case "stretch_video":
                             pending, completed = get_stretch_video_status(inp, inp2, out)
+                        case "image_to_video":
+                            pending, completed = get_image_to_video_status(inp, inp2, out)
                         case _:
                             pending, completed = [], []
 
@@ -281,6 +301,8 @@ class BatchProcessor:
                         pending, completed = get_1_image_prompt_video_status(inp, inp2, out)
                     case "stretch_video":
                         pending, completed = get_stretch_video_status(inp, inp2, out)
+                    case "image_to_video":
+                        pending, completed = get_image_to_video_status(inp, inp2, out)
                     case _:
                         pending, completed = [], []
                 t = len(pending) + len(completed)

@@ -181,3 +181,73 @@ def merge_videos_ffmpeg(json_path, out_dir, log_callback=print):
         log_callback(f"❌ Lỗi khi ghép video: {e}")
         return False
 
+
+def convert_image_to_video_ffmpeg(image_path, output_path, duration):
+    """Sử dụng ffmpeg local để chuyển đổi ảnh tĩnh thành video mp4 tĩnh có thời lượng duration."""
+    try:
+        # Lệnh ffmpeg chuyển 1 ảnh thành video mp4 tĩnh:
+        # -loop 1 -i {image_path} -t {duration} -pix_fmt yuv420p -c:v libx264 {output_path}
+        cmd = [
+            FFMPEG_EXE,
+            "-y",                     # Ghi đè file nếu đã tồn tại
+            "-loop", "1",
+            "-i", image_path,
+            "-t", str(duration),
+            "-pix_fmt", "yuv420p",
+            "-c:v", "libx264",
+            # scale chẵn chiều rộng và cao để tương thích tốt với các phần mềm phát video
+            "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+            output_path
+        ]
+        
+        # Chạy ffmpeg ngầm không hiện cửa sổ
+        subprocess.run(
+            cmd, 
+            stdout=subprocess.PIPE, 
+            stderr=subprocess.PIPE, 
+            check=True, 
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+        )
+        return True
+    except subprocess.CalledProcessError as e:
+        print(f"❌ Lỗi xử lý ffmpeg convert_image: {e.stderr}")
+        return False
+    except Exception as e:
+        print(f"❌ Lỗi không xác định khi chạy ffmpeg convert_image: {e}")
+        return False
+
+
+def handle_image_to_video(batch, out_path, log_callback):
+    """
+    Hàm xử lý lô ảnh tĩnh thành video tĩnh bằng FFmpeg. (Local 100%)
+    - batch: danh sách dict chứa {'image_in': path, 'duration': float, 'video_out': path, ...}
+    - out_path: thư mục xuất video.
+    """
+    is_healthy = True
+    failed_items = []
+    
+    if not os.path.exists(out_path):
+        os.makedirs(out_path)
+
+    for item in batch:
+        input_img = item.get('image_in')
+        target_dur = item.get('duration')
+        stt = item.get('STT')
+        output_vid = item.get('video_out')
+
+        log_callback(f"⏳ [Local FFmpeg] Đang tạo video phân cảnh: STT {stt} ({target_dur}s)...")
+        
+        if not input_img or not os.path.exists(input_img):
+            log_callback(f"⚠️ Không tìm thấy ảnh gốc cho STT {stt}")
+            failed_items.append(item)
+            continue
+            
+        success = convert_image_to_video_ffmpeg(input_img, output_vid, target_dur)
+        if success and os.path.exists(output_vid) and os.path.getsize(output_vid) > 0:
+            log_callback(f"✅ Thành công tạo video phân cảnh STT {stt}")
+        else:
+            log_callback(f"❌ Lỗi tạo video phân cảnh STT {stt}")
+            failed_items.append(item)
+            
+    return is_healthy, failed_items
+

@@ -4,6 +4,7 @@ import json
 import os
 
 from config import DEFAULT_INPUT, DEFAULT_OUTPUT, load_config, global_settings
+from utils.help_tips import bind_mode_help
 
 SETTINGS_FILE = "settings.json"
 
@@ -49,11 +50,28 @@ class DashboardTab(ttk.Frame):
             "SRT ➡ Prompt", 
             "Prompt ➡ Image", 
             "Image + Prompt ➡ Video",
-            "Video ➡ Stretch (Timecode)"
+            "Video ➡ Stretch (Timecode)",
+            "Image ➡ Video"
         )
         self.cbo_mode.pack(side="left", padx=5)
         self.cbo_mode.bind("<<ComboboxSelected>>", self._on_mode_change)
-
+        
+        # Nút tròn ⓘ hiển thị hướng dẫn dạng tooltip phẳng Obsidian-Dark khi Hover
+        self.btn_info = tk.Button(
+            self.frame_ctrl, 
+            text="ⓘ", 
+            font=("Segoe UI", 11, "bold"), 
+            fg="#00d4ff", 
+            bg="#2b2b2b", 
+            activeforeground="#ffffff", 
+            activebackground="#2b2b2b",
+            relief=tk.FLAT, 
+            bd=0, 
+            cursor="hand2"
+        )
+        self.btn_info.pack(side="left", padx=(4, 5))
+        bind_mode_help(self.btn_info, self.selected_mode)
+ 
         self.btn_run = ttk.Button(self.frame_ctrl, text="▶ CHẠY LIST", style="Accent.TButton", command=self.controller.on_start_batch)
         self.btn_run.pack(side="left", padx=20)
         
@@ -75,6 +93,7 @@ class DashboardTab(ttk.Frame):
         self.entry_in = ttk.Entry(frame_add)
         self.entry_in.insert(0, DEFAULT_INPUT)
         self.entry_in.grid(row=0, column=1, sticky="ew", padx=5)
+        
         self.btn_in = ttk.Button(frame_add, text="📂", width=3, command=self._pick_input)
         self.btn_in.grid(row=0, column=2, padx=5)
 
@@ -82,6 +101,7 @@ class DashboardTab(ttk.Frame):
         self.lbl_in2 = tk.Label(frame_add, text="Folder Ảnh:", fg="white", bg="#2b2b2b")
         self.entry_in2 = ttk.Entry(frame_add)
         self.entry_in2.insert(0, DEFAULT_INPUT)
+        
         self.btn_in2 = ttk.Button(frame_add, text="📂", width=3, command=lambda: self._pick_folder(self.entry_in2))
 
         # Output
@@ -90,6 +110,7 @@ class DashboardTab(ttk.Frame):
         self.entry_out = ttk.Entry(frame_add)
         self.entry_out.insert(0, DEFAULT_OUTPUT)
         self.entry_out.grid(row=2, column=1, sticky="ew", padx=5)
+        
         self.btn_out = ttk.Button(frame_add, text="📂", width=3, command=lambda: self._pick_folder(self.entry_out))
         self.btn_out.grid(row=2, column=2, padx=5)
 
@@ -176,10 +197,12 @@ class DashboardTab(ttk.Frame):
     def _on_mode_change(self, event):
         mode = self.selected_mode.get()
             
-        if mode in ["Prompt ➡ Image", "Image + Prompt ➡ Video", "Video ➡ Stretch (Timecode)"]:
+        if mode in ["Prompt ➡ Image", "Image + Prompt ➡ Video", "Video ➡ Stretch (Timecode)", "Image ➡ Video"]:
             self.lbl_in.config(text="File JSON Prompt:")
             if mode == "Video ➡ Stretch (Timecode)":
                 self.lbl_in2.configure(text="Thư mục Video Gốc:")
+            elif mode == "Image ➡ Video":
+                self.lbl_in2.configure(text="Thư mục Ảnh Cảnh:")
             else:
                 self.lbl_in2.configure(text="Thư mục Ảnh:")
             self.lbl_in2.grid(row=1, column=0, sticky="w", padx=5, pady=5)
@@ -193,7 +216,7 @@ class DashboardTab(ttk.Frame):
 
     def _pick_input(self):
         mode = self.selected_mode.get()
-        file_modes = ["SRT ➡ Prompt", "Prompt ➡ Image", "Image + Prompt ➡ Video", "Video ➡ Stretch (Timecode)"]
+        file_modes = ["SRT ➡ Prompt", "Prompt ➡ Image", "Image + Prompt ➡ Video", "Video ➡ Stretch (Timecode)", "Image ➡ Video"]
         
         if mode in file_modes:
             if "SRT" in mode:
@@ -220,7 +243,11 @@ class DashboardTab(ttk.Frame):
             messagebox.showwarning("Thiếu thông tin", "Vui lòng nhập đầy đủ Input, Output và chọn GEM!")
             return
             
-        if mode in ["Prompt ➡ Image", "Image + Prompt ➡ Video", "Video ➡ Stretch (Timecode)"]:
+        if not os.path.isdir(out):
+            messagebox.showerror("Lỗi", "Thư mục Output không tồn tại. Trên tab này bạn phải chọn đúng thư mục được chỉ định có sẵn!")
+            return
+
+        if mode in ["Prompt ➡ Image", "Image + Prompt ➡ Video", "Video ➡ Stretch (Timecode)", "Image ➡ Video"]:
             if not inp or not os.path.isfile(inp):
                 messagebox.showerror("Lỗi", "Vui lòng chọn File JSON.")
                 return

@@ -3,6 +3,7 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 
 import config
+from utils.tooltip import create_tooltip
 
 
 # ───────────────────────────────────────────────────────────────────────────────
@@ -10,6 +11,26 @@ import config
 # CONFIG DICT: Thêm mode mới = thêm 1 entry vào đây, không đụng code logic
 # ─────────────────────────────────────────────────────────────────────────────
 IMPORT_MODES = {
+    "Prompt ➡ Image": {
+        "required_subdirs":  ["character"],
+        "input2_folder":     "character",
+        "output_folder":     "output_image",
+        "auto_create_out":   True,
+        "badges":            ["📸 character/", "📤 output_image/ (auto)"],
+        "loop_type":         "prompt_image",
+        "need_gem":          True,
+        "validate_timecode": False,
+    },
+    "Image ➡ Video": {
+        "required_subdirs":  ["output_image"],
+        "input2_folder":     "output_image",
+        "output_folder":     "output_video",
+        "auto_create_out":   True,
+        "badges":            ["📸 output_image/", "📤 output_video/ (auto)"],
+        "loop_type":         "image_to_video",
+        "need_gem":          False,
+        "validate_timecode": True,
+    },
     "Image + Prompt ➡ Video": {
         "required_subdirs":  ["character", "output"],
         "input2_folder":     "character",
@@ -72,11 +93,17 @@ class ImportProjectTab(ttk.Frame):
 
         self.entry_root = ttk.Entry(toolbar, font=("Segoe UI", 9))
         self.entry_root.grid(row=0, column=1, sticky="ew", padx=(0, 6))
+        create_tooltip(self.entry_root, "Nhập hoặc chọn đường dẫn thư mục gốc chứa nhiều dự án con để quét tự động.")
 
-        ttk.Button(toolbar, text="📂 Browse", width=10,
-                   command=self._browse_root).grid(row=0, column=2, padx=(0, 6))
-        ttk.Button(toolbar, text="🔍 QUÉT", style="Accent.TButton", width=10,
-                   command=self._scan_root).grid(row=0, column=3)
+        self.btn_browse = ttk.Button(toolbar, text="📂 Browse", width=10,
+                   command=self._browse_root)
+        self.btn_browse.grid(row=0, column=2, padx=(0, 6))
+        create_tooltip(self.btn_browse, "📂 Chọn thư mục gốc từ máy tính của bạn.")
+
+        self.btn_scan = ttk.Button(toolbar, text="🔍 QUÉT", style="Accent.TButton", width=10,
+                   command=self._scan_root)
+        self.btn_scan.grid(row=0, column=3)
+        create_tooltip(self.btn_scan, "🔍 Quét thư mục gốc để nhận dạng tự động các dự án hợp lệ theo chế độ đã chọn.")
 
         # Row 1: chọn mode
         ttk.Label(toolbar, text="Chế độ:", font=("Segoe UI", 9)).grid(
@@ -165,6 +192,7 @@ class ImportProjectTab(ttk.Frame):
             state="disabled",
         )
         self.btn_add.pack(side="left")
+        create_tooltip(self.btn_add, "⬇ Nhấp để import hàng loạt các dự án đã chọn bên trên vào hàng chờ chạy ở Dashboard.")
 
     # ─────────────────────────────────────────────
     # MODE CHANGE
@@ -484,10 +512,16 @@ class ImportProjectTab(ttk.Frame):
             count += 1
 
 
-        # Switch về Dashboard
-        self.controller.notebook.select(self.controller.tab_dashboard)
-
         mode_label = self.selected_mode.get()
+
+        # Switch về Dashboard và tự động đồng bộ chế độ chạy
+        dashboard = self.controller.tab_dashboard
+        dashboard.selected_mode.set(mode_label)
+        dashboard.cbo_mode.set(mode_label)
+        dashboard._on_mode_change(None)
+
+        self.controller.notebook.select(dashboard)
+
         self.controller.log(
             f"📥 Đã import {count} project → Queue  "
             f"(Mode: {mode_label} | GEM: {gem_name})",

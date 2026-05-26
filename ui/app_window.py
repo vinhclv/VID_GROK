@@ -100,36 +100,47 @@ class BatchApp:
             "SRT ➡ Prompt": "srt_prompt",
             "Prompt ➡ Image": "prompt_image",
             "Image + Prompt ➡ Video": "1_image_prompt_video",
-            "Video ➡ Stretch (Timecode)": "stretch_video"
+            "Video ➡ Stretch (Timecode)": "stretch_video",
+            "Image ➡ Video": "image_to_video"
         }
         loop_type = mode_map.get(mode_text, "image_prompt")
 
         # Tiền kiểm tra cứng cho chế độ Stretch Video
         if loop_type == "stretch_video":
             from utils.file_ops import validate_stretch_videos
-            for p in queue_data:
+            for i, p in enumerate(queue_data):
                 is_valid, err_msg = validate_stretch_videos(p["input"], p["input2"])
                 if not is_valid:
-                    self.log(f"❌ Dự án: {os.path.basename(p['input'])} | {err_msg}", "ERROR")
-                    return
+                    self.log(f"⚠️ Bỏ qua '{os.path.basename(p['input'])}': {err_msg}", "WARNING")
+                    self.update_project_status_callback(i, "Failed ❌")
 
-        # Tiền kiểm tra định dạng Timecode cho chế độ Image+Prompt -> Video
-        # Bỏ qua project lỗi, tiếp tục chạy các project còn lại
-        if loop_type == "1_image_prompt_video":
-            from utils.validators import validate_timecodes
-            valid_queue = []
+        # Tiền kiểm tra cứng cho chế độ Image -> Video (Local FFmpeg)
+        if loop_type == "image_to_video":
+            from utils.file_ops import validate_image_to_video
             for i, p in enumerate(queue_data):
+                is_valid, err_msg = validate_image_to_video(p["input"], p["input2"])
+                if not is_valid:
+                    self.log(f"⚠️ Bỏ qua '{os.path.basename(p['input'])}': {err_msg}", "WARNING")
+                    self.update_project_status_callback(i, "Failed ❌")
+
+        # Tiền kiểm tra định dạng Timecode cho các chế độ có timecode
+        # Bỏ qua project lỗi, tiếp tục chạy các project còn lại
+        if loop_type in ["1_image_prompt_video", "image_to_video"]:
+            from utils.validators import validate_timecodes
+            for i, p in enumerate(queue_data):
+                # Nếu dự án đã bị đánh dấu Failed từ bước trước, bỏ qua kiểm tra timecode
+                if p.get("status") == "Failed ❌":
+                    continue
                 ok, err_msg = validate_timecodes(p["input"])
                 if not ok:
                     self.log(f"⚠️ Bỏ qua '{os.path.basename(p['input'])}': Timecode sai định dạng\n{err_msg}", "WARNING")
                     self.update_project_status_callback(i, "Skipped ⏭️")
-                else:
-                    valid_queue.append(p)
 
-            if not valid_queue:
-                self.log("❌ Tất cả project đều bị bỏ qua (timecode sai). Không có gì để chạy.", "ERROR")
-                return
-            queue_data = valid_queue
+        # Kiểm tra xem có ít nhất 1 project ở trạng thái Waiting để chạy
+        has_runnable = any(p.get("status", "Waiting") == "Waiting" for p in queue_data)
+        if not has_runnable:
+            self.log("❌ Không có dự án nào hợp lệ để chạy trong hàng chờ.", "ERROR")
+            return
 
         # 3. Lấy Profiles
         profiles = self.tab_profiles.get_selected_profiles()

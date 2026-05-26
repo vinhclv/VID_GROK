@@ -299,6 +299,116 @@ def validate_stretch_videos(json_path, video_in_dir):
             if len(missing_files) > 5:
                 err_msg += f"\n... và {len(missing_files) - 5} file khác."
             return False, err_msg
+    except Exception as e:
+        return False, f"Lỗi đọc JSON: {e}"
+
+
+def get_image_to_video_status(json_path, img_dir, out_dir):
+    """
+    Đọc file kịch bản JSON và đối chiếu với thư mục chứa ảnh tĩnh img_dir.
+    Tìm kiếm [STT].jpg hoặc [STT].png tương ứng trong img_dir.
+    Tính thời lượng video dựa theo timecode.
+    """
+    pending = []
+    completed = []
+    
+    if not os.path.exists(json_path) or not os.path.exists(img_dir):
+        return [], []
+        
+    try:
+        import json
+        with open(json_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            
+        for item in data:
+            stt = str(item.get("STT", "")).strip()
+            if not stt:
+                continue
+                
+            timecode = item.get("timecode", "").strip()
+            
+            start_time_str = "00-00-00-000"
+            duration = 5.0
+            
+            if timecode:
+                try:
+                    parts = timecode.split("-->")
+                    if len(parts) == 2:
+                        start_part = parts[0].strip()
+                        start_time_str = start_part.replace(":", "-").replace(",", "-")
+                        
+                        def to_seconds(tc):
+                            tc = tc.strip()
+                            h, m, s = tc.split(':')
+                            s, ms = s.split(',')
+                            return int(h) * 3600 + int(m) * 60 + int(s) + int(ms) / 1000
+                            
+                        duration = to_seconds(parts[1]) - to_seconds(parts[0])
+                except:
+                    pass
+                    
+            input_image_path = os.path.join(img_dir, f"{stt}.jpg")
+            if not os.path.exists(input_image_path):
+                input_image_path = os.path.join(img_dir, f"{stt}.png")
+                
+            if not os.path.exists(input_image_path):
+                # Không tìm thấy ảnh tĩnh cảnh cho phân đoạn này -> Bỏ qua
+                continue
+                
+            output_video_path = os.path.join(out_dir, f"{start_time_str}.mp4")
+
+            task_item = {
+                "STT": stt,
+                "image_in": input_image_path,
+                "video_out": output_video_path,
+                "duration": duration,
+                "Timecode": timecode
+            }
+            
+            if os.path.exists(output_video_path) and os.path.getsize(output_video_path) > 0:
+                completed.append(task_item)
+            else:
+                pending.append(task_item)
+                
+    except Exception as e:
+        print(f"❌ Lỗi quét image_to_video: {e}")
+        
+    return pending, completed
+
+
+def validate_image_to_video(json_path, img_dir):
+    """
+    Hàm kiểm tra cứng trước khi chạy Batch cho chế độ Image ➡ Video.
+    Kiểm tra xem tất cả các mục trong file JSON có file ảnh tĩnh [STT].jpg/.png tương ứng hay không.
+    """
+    if not os.path.exists(json_path):
+        return False, f"Không tìm thấy file JSON: {json_path}"
+    if not os.path.exists(img_dir):
+        return False, f"Không tìm thấy thư mục ảnh cảnh: {img_dir}"
+        
+    try:
+        import json
+        with open(json_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            
+        missing_files = []
+        for item in data:
+            stt = str(item.get("STT", "")).strip()
+            if not stt:
+                continue
+                
+            input_image_path = os.path.join(img_dir, f"{stt}.jpg")
+            if not os.path.exists(input_image_path):
+                input_image_path = os.path.join(img_dir, f"{stt}.png")
+                
+            if not os.path.exists(input_image_path):
+                missing_files.append(f"STT: {stt} -> {stt}.jpg/.png")
+                
+        if missing_files:
+            err_msg = f"Thiếu {len(missing_files)} file ảnh tĩnh so với kịch bản JSON!\nCác file bị thiếu:\n" + "\n".join(missing_files[:5])
+            if len(missing_files) > 5:
+                err_msg += f"\n... và {len(missing_files) - 5} file khác."
+            return False, err_msg
             
         return True, ""
     except Exception as e:
