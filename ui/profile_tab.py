@@ -330,24 +330,12 @@ class ProfileManagerTab(ttk.Frame):
                 print("Failed to open browser")
                 return
             try:
-                # Tab 1: hiện tên profile làm title (tận dụng trang trống đầu tiên của Playwright)
+                # Mở thẳng trang Gemini để setup trên tab đầu tiên (được tự động gắn nhãn tiêu đề profile)
                 if context.pages:
-                    info_page = context.pages[0]
+                    page = context.pages[0]
                 else:
-                    info_page = await context.new_page()
+                    page = await context.new_page()
                 
-                short_name = profile_name[:16] + "..." if len(profile_name) > 16 else profile_name
-                await info_page.set_content(f"""<!DOCTYPE html>
-<html><head><title>[{short_name}]</title></head>
-<body style="margin:0;background:#0f172a;display:flex;align-items:center;
-justify-content:center;height:100vh;font-family:monospace;color:#60a5fa">
-<div style="text-align:center;padding:20px;word-break:break-all;max-width:400px">
-{profile_name}
-</div>
-</body></html>""")
-
-                # Tab 2: mở gemini để setup      
-                page = await context.new_page()
                 await page.goto("https://gemini.google.com")
                 # Giữ browser mở cho đến khi user đóng tất cả tab
                 while True:

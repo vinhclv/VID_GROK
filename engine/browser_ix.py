@@ -180,6 +180,30 @@ async def init_driver_from_profile_playwright(profile_folder_path, log_callback=
         context = await p.chromium.launch_persistent_context(**launch_kwargs)
         context.my_download_dir = profile_folder_path
         context.playwright_instance = p
+
+        # Rút gọn tên profile nếu quá dài để hiển thị rõ phần đầu và phần đuôi (tail) trên thanh tiêu đề Chrome
+        if len(folder_name) > 12:
+            display_name = f"{folder_name[:4]}...{folder_name[-8:]}"
+        else:
+            display_name = folder_name
+
+        # Tự động chèn script đổi tiêu đề Tab chứa tên profile để người dùng phân biệt các cửa sổ trình duyệt khi chạy đa luồng
+        init_js = f"""
+        (function() {{
+            const profileName = "{display_name}";
+            function updateTitle() {{
+                if (document.title && !document.title.startsWith('[' + profileName + ']')) {{
+                    document.title = '[' + profileName + '] ' + document.title;
+                }}
+            }}
+            setInterval(updateTitle, 1000);
+            const observer = new MutationObserver(updateTitle);
+            observer.observe(document.documentElement, {{ childList: true, subtree: true }});
+            updateTitle();
+        }})();
+        """
+        await context.add_init_script(init_js)
+
         return context
 
     except Exception as e:
