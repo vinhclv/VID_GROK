@@ -5,6 +5,7 @@ import shutil
 import threading
 import time
 import json
+import config
 
 import asyncio
 from engine.browser_ix  import init_driver_from_profile_playwright
@@ -199,38 +200,40 @@ class ProfileManagerTab(ttk.Frame):
         threading.Thread(target=self._update_size_label, args=(path, card), daemon=True).start()
 
         # --- PROXY ENTRY (middle, fills remaining space) ---
-        proxy_map     = self._load_proxy_map()
-        current_proxy = proxy_map.get(profile_name, "")
+        browser_type = config.global_settings["system"].get("browser_type", "ixBrowser")
+        if browser_type == "ixBrowser":
+            proxy_map     = self._load_proxy_map()
+            current_proxy = proxy_map.get(profile_name, "")
 
-        entry_proxy = ttk.Entry(card, width=28)
-        if current_proxy:
-            entry_proxy.insert(0, current_proxy)
-            entry_proxy.config(foreground="white")
-        else:
-            entry_proxy.insert(0, "host:port:user:pass")
-            entry_proxy.config(foreground="#888")
-        entry_proxy.pack(side="left", fill="x", expand=True, padx=(10, 5))
-
-        def _focus_in(e):
-            if entry_proxy.get() == "host:port:user:pass":
-                entry_proxy.delete(0, tk.END)
+            entry_proxy = ttk.Entry(card, width=28)
+            if current_proxy:
+                entry_proxy.insert(0, current_proxy)
                 entry_proxy.config(foreground="white")
-
-        def _focus_out(e):
-            val = entry_proxy.get().strip()
-            pm  = self._load_proxy_map()
-            if not val or val == "host:port:user:pass":
-                entry_proxy.delete(0, tk.END)
+            else:
                 entry_proxy.insert(0, "host:port:user:pass")
                 entry_proxy.config(foreground="#888")
-                pm.pop(profile_name, None)
-            else:
-                entry_proxy.config(foreground="white")
-                pm[profile_name] = val
-            self._save_proxy_map(pm)
+            entry_proxy.pack(side="left", fill="x", expand=True, padx=(10, 5))
 
-        entry_proxy.bind("<FocusIn>",  _focus_in)
-        entry_proxy.bind("<FocusOut>", _focus_out)
+            def _focus_in(e):
+                if entry_proxy.get() == "host:port:user:pass":
+                    entry_proxy.delete(0, tk.END)
+                    entry_proxy.config(foreground="white")
+
+            def _focus_out(e):
+                val = entry_proxy.get().strip()
+                pm  = self._load_proxy_map()
+                if not val or val == "host:port:user:pass":
+                    entry_proxy.delete(0, tk.END)
+                    entry_proxy.insert(0, "host:port:user:pass")
+                    entry_proxy.config(foreground="#888")
+                    pm.pop(profile_name, None)
+                else:
+                    entry_proxy.config(foreground="white")
+                    pm[profile_name] = val
+                self._save_proxy_map(pm)
+
+            entry_proxy.bind("<FocusIn>",  _focus_in)
+            entry_proxy.bind("<FocusOut>", _focus_out)
 
     def _update_size_label(self, path, card_frame):
         """Calculate folder size and update label (Thread safe way)"""

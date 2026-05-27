@@ -2,13 +2,15 @@ import os
 import shutil
 import json
 from playwright.async_api import async_playwright
+import config
 
 # ==========================================
-# CẤU HÌNH ĐƯỜNG DẪN IXBROWSER CORE
+# CẤU HÌNH ĐƯỜNG DẪN IXBROWSER & GOLOGIN CORE
 # ==========================================
 # Tự động trỏ vào thư mục 142-0102 nằm ở gốc dự án (ngang hàng với thư mục engine)
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 IXBROWSER_EXE_PATH = os.path.join(BASE_DIR, "142-0102", "chrome.exe")
+ORBITA_EXE_PATH = config.ORBITA_PATH
 
 def clean_chrome_cache(profile_path):
     """
@@ -101,20 +103,21 @@ def _load_proxy_from_map(profile_folder_path):
 
 async def init_driver_from_profile_playwright(profile_folder_path, log_callback=print):
     """
-    Hàm Playwright ASYNC khởi tạo ixBrowser — dùng cho batch processing và Setup UI.
-    Hỗ trợ proxy tự động từ proxy_map.json.
+    Hàm Playwright ASYNC khởi tạo Trình duyệt — hỗ trợ song song ixBrowser và GoLogin.
+    Chỉ gắn proxy cho ixBrowser theo đúng quy ước thực tế.
     """
     if not os.path.exists(profile_folder_path):
         os.makedirs(profile_folder_path, exist_ok=True)
         log_callback(f"⚠️ Folder chưa tồn tại, đã tạo mới: {profile_folder_path}")
 
     folder_name = os.path.basename(profile_folder_path)
+    browser_type = config.global_settings["system"].get("browser_type", "ixBrowser")
 
-    log_callback(f"🧹 Đang dọn dẹp Cache cũ cho profile ixBrowser: {folder_name}...")
+    log_callback(f"🧹 Đang dọn dẹp Cache cũ cho profile {browser_type}: {folder_name}...")
     clean_preferences_bloat(profile_folder_path)
     clean_chrome_cache(profile_folder_path)
 
-    log_callback(f"🚀 Khởi động ixBrowser Profile bằng Playwright: {folder_name}")
+    log_callback(f"🚀 Khởi động {browser_type} Profile bằng Playwright: {folder_name}")
 
     profile_dl_dir = os.path.join(profile_folder_path, "Downloads")
     if os.path.exists(profile_dl_dir):
@@ -141,33 +144,36 @@ async def init_driver_from_profile_playwright(profile_folder_path, log_callback=
         "--ash-no-nudges",
     ]
 
-    # --- Đọc proxy từ proxy_map.json ---
+    # --- Chỉ nạp và gắn proxy cho chế độ ixBrowser ---
     proxy_config = None
-    proxy_str = _load_proxy_from_map(profile_folder_path)
-    if not proxy_str:
-        proxy_txt = os.path.join(profile_folder_path, "proxy.txt")
-        if os.path.exists(proxy_txt):
-            try:
-                with open(proxy_txt, "r", encoding="utf-8") as f:
-                    proxy_str = f.read().strip()
-            except: pass
+    if browser_type == "ixBrowser":
+        proxy_str = _load_proxy_from_map(profile_folder_path)
+        if not proxy_str:
+            proxy_txt = os.path.join(profile_folder_path, "proxy.txt")
+            if os.path.exists(proxy_txt):
+                try:
+                    with open(proxy_txt, "r", encoding="utf-8") as f:
+                        proxy_str = f.read().strip()
+                except: pass
 
-    if proxy_str:
-        parts = proxy_str.strip().split(":")
-        if len(parts) == 4:
-            host, port, user, pw = parts
-            proxy_config = {"server": f"http://{host}:{port}", "username": user, "password": pw}
-        elif len(parts) == 2:
-            host, port = parts
-            proxy_config = {"server": f"http://{host}:{port}"}
-        if proxy_config:
-            log_callback(f"🌐 Đã gắn Proxy: {parts[0]}:***")
+        if proxy_str:
+            parts = proxy_str.strip().split(":")
+            if len(parts) == 4:
+                host, port, user, pw = parts
+                proxy_config = {"server": f"http://{host}:{port}", "username": user, "password": pw}
+            elif len(parts) == 2:
+                host, port = parts
+                proxy_config = {"server": f"http://{host}:{port}"}
+            if proxy_config:
+                log_callback(f"🌐 Đã gắn Proxy: {parts[0]}:***")
 
     try:
         p = await async_playwright().start()
+        exe_path = ORBITA_EXE_PATH if browser_type == "GoLogin" else IXBROWSER_EXE_PATH
+        
         launch_kwargs = dict(
             user_data_dir=profile_folder_path,
-            executable_path=IXBROWSER_EXE_PATH,
+            executable_path=exe_path,
             headless=False,
             args=chrome_args,
             no_viewport=True,

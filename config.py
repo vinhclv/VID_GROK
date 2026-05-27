@@ -21,7 +21,8 @@ DEFAULT_CONFIG_DATA = {
         "max_stt_retries": 5,
         "wait_time": 30,
         "aspect_ratio": "16:9",
-        "resolution": "720p"
+        "resolution": "720p",
+        "browser_type": "ixBrowser"
     },
     "urls": {
         "gemini_url": "https://gemini.google.com",

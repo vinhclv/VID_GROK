@@ -3,7 +3,6 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 
 import config
-from utils.tooltip import create_tooltip
 
 
 # ───────────────────────────────────────────────────────────────────────────────
@@ -93,17 +92,11 @@ class ImportProjectTab(ttk.Frame):
 
         self.entry_root = ttk.Entry(toolbar, font=("Segoe UI", 9))
         self.entry_root.grid(row=0, column=1, sticky="ew", padx=(0, 6))
-        create_tooltip(self.entry_root, "Nhập hoặc chọn đường dẫn thư mục gốc chứa nhiều dự án con để quét tự động.")
 
-        self.btn_browse = ttk.Button(toolbar, text="📂 Browse", width=10,
-                   command=self._browse_root)
-        self.btn_browse.grid(row=0, column=2, padx=(0, 6))
-        create_tooltip(self.btn_browse, "📂 Chọn thư mục gốc từ máy tính của bạn.")
-
-        self.btn_scan = ttk.Button(toolbar, text="🔍 QUÉT", style="Accent.TButton", width=10,
-                   command=self._scan_root)
-        self.btn_scan.grid(row=0, column=3)
-        create_tooltip(self.btn_scan, "🔍 Quét thư mục gốc để nhận dạng tự động các dự án hợp lệ theo chế độ đã chọn.")
+        ttk.Button(toolbar, text="📂 Browse", width=10,
+                   command=self._browse_root).grid(row=0, column=2, padx=(0, 6))
+        ttk.Button(toolbar, text="🔍 QUÉT", style="Accent.TButton", width=10,
+                   command=self._scan_root).grid(row=0, column=3)
 
         # Row 1: chọn mode
         ttk.Label(toolbar, text="Chế độ:", font=("Segoe UI", 9)).grid(
@@ -192,7 +185,6 @@ class ImportProjectTab(ttk.Frame):
             state="disabled",
         )
         self.btn_add.pack(side="left")
-        create_tooltip(self.btn_add, "⬇ Nhấp để import hàng loạt các dự án đã chọn bên trên vào hàng chờ chạy ở Dashboard.")
 
     # ─────────────────────────────────────────────
     # MODE CHANGE

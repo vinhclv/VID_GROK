@@ -59,11 +59,17 @@ class SettingsTab(ttk.Frame):
         cb_res = ttk.Combobox(left_frame, textvariable=self.var_resolution, values=["720p", "1080p", "480p"], state="readonly", width=13)
         cb_res.grid(row=13, column=0, sticky="ew")
 
+        # 8. Browser Type (ixBrowser / GoLogin)
+        tk.Label(left_frame, text="Loại Trình Duyệt:", anchor="w").grid(row=14, column=0, sticky="w", pady=(15, 5))
+        self.var_browser_type = tk.StringVar(value=self.settings["system"].get("browser_type", "ixBrowser"))
+        cb_browser = ttk.Combobox(left_frame, textvariable=self.var_browser_type, values=["ixBrowser", "GoLogin"], state="readonly", width=13)
+        cb_browser.grid(row=15, column=0, sticky="ew")
+
         # Nút Save nằm dưới cùng, giãn cách xa một chút
-        ttk.Separator(left_frame, orient='horizontal').grid(row=14, column=0, sticky="ew", pady=20)
+        ttk.Separator(left_frame, orient='horizontal').grid(row=16, column=0, sticky="ew", pady=20)
         
-        ttk.Button(left_frame, text="💾 LƯU CẤU HÌNH", style="Accent.TButton", command=self.save_settings).grid(row=15, column=0, sticky="ew", pady=5)
-        ttk.Button(left_frame, text="🔄 Mặc định", command=self.reset_defaults).grid(row=16, column=0, sticky="ew")
+        ttk.Button(left_frame, text="💾 LƯU CẤU HÌNH", style="Accent.TButton", command=self.save_settings).grid(row=17, column=0, sticky="ew", pady=5)
+        ttk.Button(left_frame, text="🔄 Mặc định", command=self.reset_defaults).grid(row=18, column=0, sticky="ew")
 
         left_frame.columnconfigure(0, weight=1) # Để các input giãn full bề ngang cột trái
 
@@ -267,6 +273,7 @@ class SettingsTab(ttk.Frame):
         config.global_settings["system"]["wait_time"]       = self.var_wait_time.get()
         config.global_settings["system"]["aspect_ratio"] = self.var_aspect_ratio.get()
         config.global_settings["system"]["resolution"] = self.var_resolution.get()
+        config.global_settings["system"]["browser_type"] = self.var_browser_type.get()
 
         if config.save_config():
             messagebox.showinfo("Thành công", "Đã lưu cấu hình!")
@@ -289,6 +296,7 @@ class SettingsTab(ttk.Frame):
             self.var_wait_time.set(config.global_settings["system"]["wait_time"])
             self.var_aspect_ratio.set(config.global_settings["system"].get("aspect_ratio", "16:9"))
             self.var_resolution.set(config.global_settings["system"].get("resolution", "720p"))
+            self.var_browser_type.set(config.global_settings["system"].get("browser_type", "ixBrowser"))
             self._load_gems_to_tree()
             self._refresh_project_combobox()
             config.save_config()
