@@ -1,11 +1,11 @@
 {
     "system": {
         "max_threads": 2,
-        "loop_limit": 2,
+        "loop_limit": 30,
         "max_retries": 10,
         "max_stt_retries": 1,
-        "wait_time": 30,
-        "aspect_ratio": "1:1",
+        "wait_time": 45,
+        "aspect_ratio": "9:16",
         "resolution": "480p",
         "browser_type": "GoLogin"
     },
@@ -23,6 +23,11 @@
         {
             "name": "grok",
             "url": "https://grok.com/imagine",
+            "description": "Mô tả..."
+        },
+        {
+            "name": "veo3",
+            "url": "https://labs.google/fx/tools/flow",
             "description": "Mô tả..."
         }
     ],

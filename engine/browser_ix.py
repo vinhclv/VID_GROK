@@ -36,7 +36,6 @@ def clean_chrome_cache(profile_path):
             try: shutil.rmtree(full_path, ignore_errors=True)
             except: pass
 
-    # --- Xóa file ixBrowser-specific gây crash STATUS_BREAKPOINT ---
     # Cookie/Login data được bảo lưu bằng cách giữ nguyên Local State chứa khóa DPAPI.
     # File Local State của ixBrowser cũ đã được xóa một lần duy nhất lúc Import.
     ix_crash_files = ["Last Browser", "Last Version", "Variations", "extension_setting.txt"]

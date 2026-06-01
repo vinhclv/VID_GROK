@@ -5,7 +5,8 @@ from engine.browser_ix import init_driver_from_profile_playwright
 from engine.tasks.handler import (
     handle_1_image_prompt_video_async,
     handle_srt_to_prompt_async,
-    handle_prompt_to_image_async
+    handle_prompt_to_image_grok_async,
+    handle_prompt_to_image_veo3_async
 )
 
 def run_worker_task(profile_folder, batch, task_type, assets_path, prompt, url, profiles_dir, stop_event, log_callback):
@@ -64,9 +65,14 @@ async def playwright_lifecycle_manager(profile_path, file_batch, assets_path, pr
                 context, file_batch, assets_path, prefix_prompt, url, log_callback
             )
         elif task_type == "prompt_image":
-            is_healthy, failed_items = await handle_prompt_to_image_async(
-                context, file_batch, assets_path, prefix_prompt, url, log_callback
-            )
+            if "grok.com" in url:
+                is_healthy, failed_items = await handle_prompt_to_image_grok_async(
+                    context, file_batch, assets_path, prefix_prompt, url, log_callback
+                )
+            else:
+                is_healthy, failed_items = await handle_prompt_to_image_veo3_async(
+                    context, file_batch, assets_path, prefix_prompt, url, log_callback
+                )
         else:
             is_healthy, failed_items = True, list(file_batch)
 

@@ -68,7 +68,7 @@ async def setup_image_format_ui(page: Page):
     except Exception as e:
         print(f'⚠️ Bỏ qua chọn Tỉ lệ ảnh: {e}')
 
-async def process_prompt_to_image_async(page: Page, item: dict, log_callback=print) -> bool:
+async def process_prompt_to_image_grok_async(page: Page, item: dict, log_callback=print) -> bool:
     """
     Xử lý tạo ảnh bằng Playwright:
     1. Chọn model Advanced/Pro nếu có.
@@ -233,6 +233,42 @@ async def process_prompt_to_image_async(page: Page, item: dict, log_callback=pri
         await textbox.fill("")
         await human_type(textbox, full_prompt, page)
         await page.wait_for_timeout(random.uniform(1000, 2000))
+
+        # --- 6.5. ĐỊNH DẠNG TỈ LỆ ẢNH THAM CHIẾU (CHỈ KHI CÓ ĐÚNG 1 ẢNH) ---
+        if image_paths and len(image_paths) == 1:
+            try:
+                system_cfg = config.global_settings.get('system', {})
+                aspect_ratio = system_cfg.get('aspect_ratio', '16:9') # Mặc định 16:9
+                
+                # Tìm tất cả các nút Aspect Ratio của ảnh tham chiếu
+                ratio_selectors = page.locator("button[aria-label='Aspect Ratio']")
+                count = await ratio_selectors.count()
+                
+                if count > 0:
+                    log_callback(f"🖼️ [Grok] Phát hiện {count} ảnh tham chiếu. Tiến hành chọn tỉ lệ {aspect_ratio}...")
+                    for i in range(count):
+                        btn = ratio_selectors.nth(i)
+                        if await btn.is_visible(timeout=2000):
+                            await human_click(btn, page)
+                            await page.wait_for_timeout(800)
+                            
+                            # Tìm các phần tử chứa tỉ lệ mong muốn (e.g. '16:9'), loại trừ nút Aspect Ratio chính
+                            options = page.locator(f"button:has-text('{aspect_ratio}'), div:has-text('{aspect_ratio}'), span:has-text('{aspect_ratio}')").filter(has_not=btn)
+                            
+                            count_opt = await options.count()
+                            for j in range(count_opt):
+                                opt = options.nth(j)
+                                if await opt.is_visible(timeout=500):
+                                    text_val = await opt.inner_text()
+                                    # Chỉ click các phần tử lá có độ dài chữ ngắn (dưới 30 ký tự)
+                                    if len(text_val.strip()) < 30:
+                                        await human_click(opt, page)
+                                        log_callback(f"✅ [Grok] Đã định dạng ảnh tham chiếu thứ {i+1} về tỉ lệ {aspect_ratio} ({text_val.strip()}).")
+                                        await page.wait_for_timeout(500)
+                                        break
+            except Exception as e:
+                log_callback(f"⚠️ [Grok] Lỗi thiết lập tỉ lệ ảnh tham chiếu: {e}")
+                pass
 
         # --- 7. BẤM GỬI ---
         btn_gen = page.locator("form div.absolute.right-2 button, form button[type='submit']").last
