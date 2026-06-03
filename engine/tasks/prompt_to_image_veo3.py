@@ -77,8 +77,12 @@ async def setup_image_creation_mode_veo3(page: Page):
         # 2. Huỷ option tác nhân
         close_btn = page.locator("xpath=/html/body/div[1]/div[1]/div[5]/div/div/div/div/div[2]/div[1]/div/button[2]").first
         await close_btn.wait_for(state="visible", timeout=15000)
-        await human_click(close_btn, page)
-        await page.wait_for_timeout(500)
+        
+        aria_pressed = await close_btn.get_attribute("aria-pressed")
+        if aria_pressed == "true":
+            await human_click(close_btn, page)
+            await page.wait_for_timeout(500)
+            print("✅ [Veo3] Đã huỷ option tác nhân thành công.")
 		
         # 3. Chọn chế độ
         mode_btn = page.locator("xpath=/html/body/div[1]/div[1]/div[5]/div/div/div/div/div[2]/div[2]/button[1]").last

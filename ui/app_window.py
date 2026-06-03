@@ -85,6 +85,8 @@ class BatchApp:
             self.tab_dashboard.refresh_gem_list()
         elif selected_widget == self.tab_profiles:
             self.tab_profiles.refresh_list()
+        elif selected_widget == self.tab_import:
+            self.tab_import.refresh_gem_list()
 
     # --- CÁC HÀM GỌI TỪ UI ---
     def on_start_batch(self):

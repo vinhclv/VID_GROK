@@ -12,16 +12,19 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 IXBROWSER_EXE_PATH = os.path.join(BASE_DIR, "142-0102", "chrome.exe")
 ORBITA_EXE_PATH = config.ORBITA_PATH
 
+# Flag để đảm bảo chỉ tự động phân quyền Sandbox 1 lần duy nhất mỗi lần chạy ứng dụng
+_permissions_fixed = False
+
 def clean_chrome_cache(profile_path):
     """
     Dọn dẹp rác cache để trình duyệt nhẹ hơn.
     Cũng xóa Local State / stale lock gây crash khi mở profile lấy từ ixBrowser.
     """
-    root_garbage = ["Crashpad", "Safe Browsing", "GrShaderCache", "ShaderCache", "GraphiteDawnCache"]
+    root_garbage = ["Crashpad", "Safe Browsing", "GrShaderCache", "ShaderCache", "GraphiteDawnCache", "lock_cookies"]
     default_dir = os.path.join(profile_path, "Default")
     default_garbage = [
         "Cache", "Code Cache", "GPUCache", "DawnCache",
-        "DawnGraphiteCache", "DawnWebGPUCache", "Trace"
+        "DawnGraphiteCache", "DawnWebGPUCache", "Trace", "Sync Data"
     ]
 
     for folder in root_garbage:
@@ -105,6 +108,25 @@ async def init_driver_from_profile_playwright(profile_folder_path, log_callback=
     Hàm Playwright ASYNC khởi tạo Trình duyệt — hỗ trợ song song ixBrowser và GoLogin.
     Chỉ gắn proxy cho ixBrowser theo đúng quy ước thực tế.
     """
+    global _permissions_fixed
+    if not _permissions_fixed and os.name == 'nt':
+        try:
+            import subprocess
+            # Tự động phân quyền thư mục 142-0102 (ixBrowser) và orbita-browser-141 (GoLogin)
+            for path_name in ["142-0102", "orbita-browser-141"]:
+                dir_path = os.path.join(BASE_DIR, path_name)
+                if os.path.exists(dir_path):
+                    log_callback(f"🛡️ Đang tự động phân quyền Sandbox cho thư mục {path_name}...")
+                    subprocess.run(
+                        f'icacls "{dir_path}" /grant *S-1-15-2-1:(OI)(CI)(RX) /T',
+                        shell=True,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL
+                    )
+            _permissions_fixed = True
+        except Exception as ex:
+            log_callback(f"⚠️ Lỗi phân quyền tự động: {ex}")
+
     if not os.path.exists(profile_folder_path):
         os.makedirs(profile_folder_path, exist_ok=True)
         log_callback(f"⚠️ Folder chưa tồn tại, đã tạo mới: {profile_folder_path}")

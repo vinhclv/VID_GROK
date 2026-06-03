@@ -241,7 +241,7 @@ async def process_prompt_to_image_grok_async(page: Page, item: dict, log_callbac
                 aspect_ratio = system_cfg.get('aspect_ratio', '16:9') # Mặc định 16:9
                 
                 # Tìm tất cả các nút Aspect Ratio của ảnh tham chiếu
-                ratio_selectors = page.locator("button[aria-label='Aspect Ratio']")
+                ratio_selectors = page.locator("button[aria-label='Aspect Ratio'], button[aria-label='Tỷ lệ khung hình']")
                 count = await ratio_selectors.count()
                 
                 if count > 0:

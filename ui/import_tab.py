@@ -74,8 +74,9 @@ class ImportProjectTab(ttk.Frame):
         self.folder_data: dict[str, dict] = {}
 
         self.selected_mode = tk.StringVar(value=list(IMPORT_MODES.keys())[0])
-
         self._build_ui()
+        self.refresh_gem_list()
+        self._on_mode_change()
 
     # ─────────────────────────────────────────────
     # BUILD UI
@@ -113,7 +114,21 @@ class ImportProjectTab(ttk.Frame):
         self.cbo_mode.grid(row=1, column=1, sticky="w", pady=(6, 0))
         self.cbo_mode.bind("<<ComboboxSelected>>", self._on_mode_change)
 
-        ttk.Separator(self, orient="horizontal").pack(fill="x", pady=(4, 0))
+        # Row 2: chọn GEM
+        self.lbl_gem = ttk.Label(toolbar, text="GEM:", font=("Segoe UI", 9))
+        self.lbl_gem.grid(row=2, column=0, sticky="w", padx=(0, 8), pady=(6, 0))
+
+        self.selected_gem = tk.StringVar()
+        self.cbo_gem = ttk.Combobox(
+            toolbar,
+            textvariable=self.selected_gem,
+            state="readonly",
+            font=("Segoe UI", 9),
+            width=35,
+        )
+        self.cbo_gem.grid(row=2, column=1, sticky="w", pady=(6, 0))
+
+        ttk.Separator(self, orient="horizontal").pack(fill="x", pady=(8, 0))
 
         # ── Summary bar ──────────────────────────
         summary_bar = ttk.Frame(self, padding=(12, 5, 12, 3))
@@ -195,6 +210,25 @@ class ImportProjectTab(ttk.Frame):
         self.lbl_status.config(
             text="Đã đổi chế độ — nhấn 🔍 QUÉT lại.",
             foreground="#888")
+        
+        cfg = IMPORT_MODES[self.selected_mode.get()]
+        if cfg.get("need_gem"):
+            self.lbl_gem.grid(row=2, column=0, sticky="w", padx=(0, 8), pady=(6, 0))
+            self.cbo_gem.grid(row=2, column=1, sticky="w", pady=(6, 0))
+        else:
+            self.lbl_gem.grid_remove()
+            self.cbo_gem.grid_remove()
+
+    def refresh_gem_list(self):
+        gems = config.global_settings.get("gems", [])
+        gem_names = [g["name"] for g in gems]
+        current = self.selected_gem.get()
+        self.cbo_gem['values'] = gem_names
+        if gem_names:
+            if not current or current not in gem_names:
+                self.cbo_gem.current(0)
+            else:
+                self.selected_gem.set(current)
 
     # ─────────────────────────────────────────────
     # SCAN
@@ -456,18 +490,16 @@ class ImportProjectTab(ttk.Frame):
         gem_name = ""
         url      = ""
         if cfg["need_gem"]:
-
+            selected_gem_name = self.selected_gem.get()
             gems = config.global_settings.get("gems", [])
-            if not gems:
+            gem = next((g for g in gems if g["name"] == selected_gem_name), None)
+            if not gem:
                 messagebox.showwarning(
-                    "Chưa có GEM",
-                    "Chưa có GEM nào trong Settings!\n"
-                    "Vui lòng thêm GEM trước (Tab ⚙️ Cài đặt).")
+                    "Thiếu GEM",
+                    "Vui lòng chọn GEM hợp lệ!")
                 return
-            grok_gems = [g for g in gems if "grok" in g.get("name", "").lower()]
-            gem       = grok_gems[0] if grok_gems else gems[0]
-            gem_name  = gem["name"]
-            url       = gem.get("url", "")    # ← URL lấy từ GEM, không phải videofx_url
+            gem_name = gem["name"]
+            url      = gem.get("url", "")
         else:
             gem_name = "Local FFmpeg"         # Stretch mode: FFmpeg local
 

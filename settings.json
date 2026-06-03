@@ -7,7 +7,7 @@
         "wait_time": 45,
         "aspect_ratio": "9:16",
         "resolution": "480p",
-        "browser_type": "GoLogin"
+        "browser_type": "ixBrowser"
     },
     "urls": {
         "gemini_url": "https://gemini.google.com",
