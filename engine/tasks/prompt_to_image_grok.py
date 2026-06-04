@@ -36,19 +36,25 @@ async def setup_image_format_ui(page: Page):
                 await human_click(dropdown_btn, page) # Mở menu thả xuống
                 await page.wait_for_timeout(800)
                 
-                # Tìm các phần tử chứa tỉ lệ mong muốn (e.g. '9:16'), loại trừ nút dropdown chính
-                options = page.locator(f"button:has-text('{aspect_ratio}'), div:has-text('{aspect_ratio}'), span:has-text('{aspect_ratio}')").filter(has_not=dropdown_btn)
-                
+                # Ưu tiên tìm trong popup menu nổi để tránh click nhầm vào background cards
+                options = page.locator("[role='menu'] *, [role='listbox'] *, [role='dialog'] *, [class*='menu'] *, [class*='popover'] *, .popover *").filter(has_text=re.compile(rf"^{aspect_ratio}")).filter(has_not=dropdown_btn)
                 count = await options.count()
+                
+                if count == 0:
+                    options = page.locator(f"button:has-text('{aspect_ratio}'), div:has-text('{aspect_ratio}'), span:has-text('{aspect_ratio}')").filter(has_not=dropdown_btn)
+                    count = await options.count()
+                
                 clicked = False
+                suffixes = ["Dọc", "Portrait", "Rộng", "Wide", "Vuông", "Square", "Cao", "Tall", "Màn hình rộng", "Widescreen"]
+                
                 for i in range(count):
                     opt = options.nth(i)
                     if await opt.is_visible(timeout=500):
                         text_val = await opt.inner_text()
-                        # Chỉ click các phần tử lá có độ dài chữ ngắn (dưới 30 ký tự) để tránh click trúng div container cha chứa tất cả các option
-                        if len(text_val.strip()) < 30:
+                        text_strip = text_val.strip()
+                        if len(text_strip) < 30 and (any(s in text_strip for s in suffixes) or count > 0):
                             await human_click(opt, page)
-                            print(f'✅ Đã đổi tỉ lệ khung hình ảnh thành: {aspect_ratio} ({text_val.strip()})')
+                            print(f'✅ Đã đổi tỉ lệ khung hình ảnh thành: {aspect_ratio} ({text_strip})')
                             clicked = True
                             break
                 
@@ -60,9 +66,10 @@ async def setup_image_format_ui(page: Page):
                         fb = fallbacks.nth(i)
                         if await fb.is_visible(timeout=500):
                             t_val = await fb.inner_text()
-                            if len(t_val.strip()) < 30:
+                            t_strip = t_val.strip()
+                            if len(t_strip) < 30:
                                 await human_click(fb, page)
-                                print(f'✅ Đã đổi tỉ lệ bằng fallback thành: {aspect_ratio} ({t_val.strip()})')
+                                print(f'✅ Đã đổi tỉ lệ bằng fallback thành: {aspect_ratio} ({t_strip})')
                                 clicked = True
                                 break
     except Exception as e:
@@ -252,20 +259,42 @@ async def process_prompt_to_image_grok_async(page: Page, item: dict, log_callbac
                             await human_click(btn, page)
                             await page.wait_for_timeout(800)
                             
-                            # Tìm các phần tử chứa tỉ lệ mong muốn (e.g. '16:9'), loại trừ nút Aspect Ratio chính
-                            options = page.locator(f"button:has-text('{aspect_ratio}'), div:has-text('{aspect_ratio}'), span:has-text('{aspect_ratio}')").filter(has_not=btn)
-                            
+                            # Ưu tiên tìm các phần tử tỉ lệ nằm trong popup menu nổi để tránh click nhầm vào các thẻ/card ở nền
+                            options = page.locator("[role='menu'] *, [role='listbox'] *, [role='dialog'] *, [class*='menu'] *, [class*='popover'] *, .popover *").filter(has_text=re.compile(rf"^{aspect_ratio}"))
                             count_opt = await options.count()
+                            
+                            # Nếu không tìm thấy trong menu nổi, fallback tìm tất cả các thẻ chứa tỉ lệ có hậu tố Dọc/Ngang/Vuông...
+                            if count_opt == 0:
+                                options = page.locator(f"button:has-text('{aspect_ratio}'), div:has-text('{aspect_ratio}'), span:has-text('{aspect_ratio}')").filter(has_not=btn)
+                                count_opt = await options.count()
+                            
+                            clicked_opt = False
+                            suffixes = ["Dọc", "Portrait", "Rộng", "Wide", "Vuông", "Square", "Cao", "Tall", "Màn hình rộng", "Widescreen"]
+                            
                             for j in range(count_opt):
                                 opt = options.nth(j)
                                 if await opt.is_visible(timeout=500):
                                     text_val = await opt.inner_text()
-                                    # Chỉ click các phần tử lá có độ dài chữ ngắn (dưới 30 ký tự)
-                                    if len(text_val.strip()) < 30:
+                                    text_strip = text_val.strip()
+                                    # Chỉ click nếu là option của menu (chứa hậu tố tỉ lệ hoặc nằm trong menu nổi)
+                                    if len(text_strip) < 30 and (any(s in text_strip for s in suffixes) or count_opt > 0):
                                         await human_click(opt, page)
-                                        log_callback(f"✅ [Grok] Đã định dạng ảnh tham chiếu thứ {i+1} về tỉ lệ {aspect_ratio} ({text_val.strip()}).")
+                                        log_callback(f"✅ [Grok] Đã định dạng ảnh tham chiếu thứ {i+1} về tỉ lệ {aspect_ratio} ({text_strip}).")
                                         await page.wait_for_timeout(500)
+                                        clicked_opt = True
                                         break
+                            
+                            # Cực kỳ dự phòng: click phần tử đầu tiên thỏa mãn nếu không cái nào khớp hậu tố
+                            if not clicked_opt and count_opt > 0:
+                                for j in range(count_opt):
+                                    opt = options.nth(j)
+                                    if await opt.is_visible(timeout=500):
+                                        text_strip = (await opt.inner_text()).strip()
+                                        if len(text_strip) < 30:
+                                            await human_click(opt, page)
+                                            log_callback(f"✅ [Grok] Click dự phòng tỉ lệ: {text_strip}")
+                                            await page.wait_for_timeout(500)
+                                            break
             except Exception as e:
                 log_callback(f"⚠️ [Grok] Lỗi thiết lập tỉ lệ ảnh tham chiếu: {e}")
                 pass

@@ -288,7 +288,12 @@ async def process_1_image_video_batch(page: Page, file_batch: list, output_folde
 
             # Nhập Text (Xóa text cũ của bản nháp nếu có trước khi gõ)
             full_prompt = f"{id_tag} {prompt_text}"
-            await textbox.fill("") 
+            await human_click(textbox, page)
+            await page.wait_for_timeout(300)
+            await page.keyboard.press("Control+A")
+            await page.wait_for_timeout(150)
+            await page.keyboard.press("Backspace")
+            await page.wait_for_timeout(200)
             await human_type(textbox, full_prompt, page)
             await page.wait_for_timeout(random.uniform(1000, 2000))
             

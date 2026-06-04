@@ -274,7 +274,7 @@ class ImportProjectTab(ttk.Frame):
         self._update_counter()
         self.btn_add.config(state="normal")
 
-        # Log tất cả lỗi timecode xuống nhật ký
+        # Log tất cả lỗi timecode & thiếu ảnh nhân vật xuống nhật ký
         for name, data in valid.items():
             if not data.get("tc_ok", True):
                 bad_stts = data.get("tc_bad_stts", [])
@@ -290,6 +290,15 @@ class ImportProjectTab(ttk.Frame):
                     err_line = tc_err.splitlines()[0].strip() if tc_err else "Lỗi không xác định"
                     self.controller.log(
                         f"⚠️  [{name}] {err_line}",
+                        "WARNING"
+                    )
+            
+            if not data.get("char_ok", True):
+                char_bad_stts = data.get("char_bad_stts", [])
+                if char_bad_stts:
+                    chars_str = ", ".join(char_bad_stts)
+                    self.controller.log(
+                        f"⚠️  [{name}] Thiếu ảnh nhân vật — Tên nhân vật thiếu: {chars_str}",
                         "WARNING"
                     )
 
@@ -343,6 +352,15 @@ class ImportProjectTab(ttk.Frame):
                             # Parse ra danh sách STT từ thông báo lỗi
                             tc_bad_stts = _re.findall(r'STT (\S+?):', tc_err)
 
+                    # Validate character images nếu thư mục "character" được yêu cầu trong mode này
+                    char_ok = True
+                    char_err = ""
+                    char_bad_stts = []
+                    if "character" in cfg.get("required_subdirs", []):
+                        from utils.validators import validate_characters
+                        char_dir = found_subdirs["character"]
+                        char_ok, char_err, char_bad_stts = validate_characters(json_path, char_dir)
+
                     result[name] = {
                         "json":         json_path,
                         "subdirs":      found_subdirs,
@@ -350,6 +368,9 @@ class ImportProjectTab(ttk.Frame):
                         "tc_ok":        tc_ok,
                         "tc_err":       tc_err,
                         "tc_bad_stts":  tc_bad_stts,
+                        "char_ok":      char_ok,
+                        "char_err":     char_err,
+                        "char_bad_stts": char_bad_stts,
                     }
 
         return result
@@ -372,7 +393,9 @@ class ImportProjectTab(ttk.Frame):
     # ─────────────────────────────────────────────
     def _add_folder_row(self, idx: int, name: str, data: dict, cfg: dict):
         tc_ok  = data.get("tc_ok", True)
-        tc_err = data.get("tc_err", "")
+        char_ok = data.get("char_ok", True)
+        is_ok = tc_ok and char_ok
+        
         bg = self.ROW_EVEN if idx % 2 == 0 else self.ROW_ODD
 
         card = tk.Frame(self.scroll_frame, bg=bg, pady=5, padx=8)
@@ -381,13 +404,13 @@ class ImportProjectTab(ttk.Frame):
         card.bind("<Enter>",  lambda e, f=card: f.config(bg=self.ROW_HOVER))
         card.bind("<Leave>",  lambda e, f=card, b=bg: f.config(bg=b))
 
-        # Checkbox — disabled nếu timecode sai
-        var = tk.BooleanVar(value=tc_ok)   # sử lý: sai thì uncheck luôn
+        # Checkbox — disabled nếu timecode sai hoặc thiếu ảnh nhân vật
+        var = tk.BooleanVar(value=is_ok)   # sử lý: sai hoặc thiếu thì uncheck luôn
         self.folder_vars[name] = var
 
         chk = ttk.Checkbutton(card, variable=var,
                                command=self._update_counter, cursor="hand2")
-        if not tc_ok:
+        if not is_ok:
             chk.state(["disabled"])        # disable, không cho chọn
         chk.pack(side="left", padx=(0, 4))
 
@@ -396,7 +419,7 @@ class ImportProjectTab(ttk.Frame):
                  fg="#555", font=("Segoe UI", 9), width=3).pack(side="left", padx=(0, 6))
 
         # Folder name — vàng nếu lỗi, trắng nếu ok
-        name_color = "#ffaa00" if not tc_ok else "#e0e0e0"
+        name_color = "#ffaa00" if not is_ok else "#e0e0e0"
         tk.Label(card, text=name, bg=bg,
                  fg=name_color, font=("Segoe UI", 10, "bold"),
                  width=20, anchor="w").pack(side="left", padx=(0, 12))
@@ -408,20 +431,33 @@ class ImportProjectTab(ttk.Frame):
                  fg="#cccccc", font=("Consolas", 8),
                  width=26, anchor="w").pack(side="left", padx=(0, 10))
 
-        if tc_ok:
+        if is_ok:
             # Badges bình thường
             for label in cfg["badges"]:
                 tk.Label(card, text=label, bg=bg,
                          fg="#aaaaaa", font=("Segoe UI", 8)).pack(side="left", padx=(0, 10))
         else:
-            # Hiển thị các STT bị lỗi
-            bad_stts = data.get("tc_bad_stts", [])
-            if bad_stts:
-                stts_str = ", ".join(bad_stts[:8])
-                suffix   = f" (+{len(bad_stts)-8} nữa)" if len(bad_stts) > 8 else ""
-                warn_txt = f"⚠️ STT lỗi: {stts_str}{suffix}"
-            else:
-                warn_txt = "⚠️ Timecode sai định dạng"
+            # Hiển thị các lỗi (timecode hoặc thiếu nhân vật)
+            warn_txts = []
+            if not tc_ok:
+                bad_stts = data.get("tc_bad_stts", [])
+                if bad_stts:
+                    stts_str = ", ".join(bad_stts[:4])
+                    suffix   = f" (+{len(bad_stts)-4} nữa)" if len(bad_stts) > 4 else ""
+                    warn_txts.append(f"⚠️ STT lỗi TC: {stts_str}{suffix}")
+                else:
+                    warn_txts.append("⚠️ Timecode sai định dạng")
+                    
+            if not char_ok:
+                char_bad_stts = data.get("char_bad_stts", [])
+                if char_bad_stts:
+                    chars_str = ", ".join(char_bad_stts[:4])
+                    suffix   = f" (+{len(char_bad_stts)-4} nữa)" if len(char_bad_stts) > 4 else ""
+                    warn_txts.append(f"⚠️ Thiếu ảnh: {chars_str}{suffix}")
+                else:
+                    warn_txts.append("⚠️ Thiếu ảnh nhân vật")
+            
+            warn_txt = " | ".join(warn_txts)
             tk.Label(card, text=warn_txt, bg=bg,
                      fg="#ffaa00", font=("Segoe UI", 8, "bold")).pack(side="left", padx=(0, 6))
 
@@ -512,8 +548,8 @@ class ImportProjectTab(ttk.Frame):
                 continue
             data = self.folder_data[name]
 
-            # Bỏ qua nếu timecode sai (checkbox đã disabled nhưng guard chắc chắn)
-            if not data.get("tc_ok", True):
+            # Bỏ qua nếu timecode sai hoặc thiếu ảnh nhân vật (checkbox đã disabled nhưng guard chắc chắn)
+            if not data.get("tc_ok", True) or not data.get("char_ok", True):
                 continue
 
             # input2: folder nguồn (character/ hoặc output/)
