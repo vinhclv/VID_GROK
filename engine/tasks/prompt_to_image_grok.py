@@ -147,11 +147,26 @@ async def process_prompt_to_image_grok_async(page: Page, item: dict, log_callbac
         # --- ĐĂNG KÝ BỘ CHẶN NETWORK NATIVE ĐỂ TỰ ĐỘNG BẮT ẢNH ---
         if not hasattr(page, 'grok_image_urls'):
             page.grok_image_urls = []
+        
+        page.grok_api_rate_limited = False
+        
         if not hasattr(page, 'grok_image_results'):
             page.grok_image_results = {}
             
             async def on_response(response):
                 try:
+                    # Kiểm tra lỗi rate limit trực tiếp từ các cuộc gọi API tin nhắn
+                    if "rest/app-chat/conversations/new" in response.url or "/messages/new" in response.url:
+                        if response.status == 429:
+                            page.grok_api_rate_limited = True
+                        else:
+                            try:
+                                text = await response.text()
+                                if "Too many requests" in text or '"code":8' in text or 'rate_limit' in text.lower():
+                                    page.grok_api_rate_limited = True
+                            except:
+                                pass
+
                     # 1. Chặn phản hồi assets.grok.com để lưu các ảnh thực tế được sinh ra (bỏ qua preview_image, content, part)
                     if "assets.grok.com" in response.url:
                         if "/generated/" in response.url and "/content" not in response.url and "-part-" not in response.url and "preview_image" not in response.url:
@@ -352,6 +367,25 @@ async def process_prompt_to_image_grok_async(page: Page, item: dict, log_callbac
         
         while time.time() - start_wait < wait_limit:
             elapsed = time.time() - start_wait
+            
+            # 8.0. Kiểm tra dính rate limit trên trang
+            limit_keywords = [
+                "reached the limit", "reached your limit", "đạt đến giới hạn", "đạt giới hạn", 
+                "grok is at capacity", "too many requests", "giới hạn tạo ảnh"
+            ]
+            has_limit = await page.evaluate("""(keywords) => {
+                const els = Array.from(document.querySelectorAll('div, p, span, h1, h2, h3, li, button'));
+                return els.some(el => {
+                    if (el.children.length > 0) return false;
+                    const text = (el.textContent || '').toLowerCase();
+                    return keywords.some(kw => text.includes(kw));
+                });
+            }""", limit_keywords)
+            
+            if has_limit or getattr(page, "grok_api_rate_limited", False):
+                log_callback("⚠️ Phát hiện thông báo giới hạn tạo ảnh (Rate Limit / Cooldown) trên trang hoặc API!", "WARNING")
+                from utils.profile_state import RateLimitException
+                raise RateLimitException("Dính giới hạn tạo ảnh trên Grok")
             
             # 8.1. Kiểm tra kết quả bắt từ Request Stream (Ưu tiên số 1 tuyệt đối)
             if elapsed >= 5 and stt in page.grok_image_results:
@@ -609,6 +643,8 @@ async def process_prompt_to_image_grok_async(page: Page, item: dict, log_callbac
             return False
 
     except Exception as e:
+        if e.__class__.__name__ == "RateLimitException":
+            raise e
         log_callback(f"❌ Lỗi ngoại lệ hệ thống xử lý STT {item.get('STT')}: {e}")
         if save_path and os.path.exists(save_path):
             try: os.remove(save_path)

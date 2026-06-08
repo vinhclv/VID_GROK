@@ -13,6 +13,8 @@ from ui.settings_tab import SettingsTab
 from ui.import_tab import ImportProjectTab    
 from engine.batch_processor import BatchProcessor 
 
+from utils.profile_state import ProfileStateManager
+
 # Định nghĩa đường dẫn thư mục chứa Profiles
 PROFILES_DIR = os.path.join(os.getcwd(), "profiles")
 if not os.path.exists(PROFILES_DIR):
@@ -25,6 +27,9 @@ class BatchApp:
         self.root.geometry("1100x900")
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         
+        # Reset trạng thái các profile về idle lúc khởi động
+        ProfileStateManager().reset_all()
+        
         try: sv_ttk.set_theme("dark")
         except: pass
 
@@ -32,9 +37,13 @@ class BatchApp:
         self.is_running = False
         self.stop_event = threading.Event()
         
+        # Tạo PanedWindow dọc để phân tách Notebook và Logs, cho phép kéo giãn bằng chuột
+        main_pane = ttk.PanedWindow(self.root, orient="vertical")
+        main_pane.pack(fill="both", expand=True, padx=10, pady=10)
+
         # 1. Tạo Notebook và các Tab UI TRƯỚC
-        self.notebook = ttk.Notebook(self.root)
-        self.notebook.pack(fill="both", expand=True, padx=5, pady=5)
+        self.notebook = ttk.Notebook(main_pane)
+        main_pane.add(self.notebook, weight=3)
         
         # TAB 1: Dashboard & Queue
         self.tab_dashboard = DashboardTab(self.notebook, self) 
@@ -57,8 +66,8 @@ class BatchApp:
         self.notebook.add(self.tab_import, text="📥 Import Project")
 
         # LOGS
-        frame_log = ttk.LabelFrame(self.root, text="📜 Nhật ký hoạt động", padding=10)
-        frame_log.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+        frame_log = ttk.LabelFrame(main_pane, text="📜 Nhật ký hoạt động", padding=10)
+        main_pane.add(frame_log, weight=1)
         
         self.log_area = scrolledtext.ScrolledText(frame_log, height=10, state='disabled', font=("Consolas", 10))
         self.log_area.pack(fill="both", expand=True)

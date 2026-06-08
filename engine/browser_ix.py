@@ -93,15 +93,10 @@ def clean_preferences_bloat(profile_path):
         print(f"⚠️ Lỗi nhẹ khi dọn Preferences: {e}")
 
 def _load_proxy_from_map(profile_folder_path):
-    """Đọc proxy từ proxy_map.json theo profile_id (ưu tiên hơn proxy.txt)"""
-    profile_id   = os.path.basename(profile_folder_path)
-    profiles_dir = os.path.dirname(profile_folder_path)
-    proxy_map_path = os.path.join(profiles_dir, "proxy_map.json")
-    try:
-        with open(proxy_map_path, "r", encoding="utf-8") as f:
-            return json.load(f).get(profile_id, "")
-    except:
-        return ""
+    """Đọc proxy từ ProfileStateManager theo profile_id (ưu tiên hơn proxy.txt)"""
+    profile_id = os.path.basename(profile_folder_path)
+    from utils.profile_state import ProfileStateManager
+    return ProfileStateManager().get_proxy(profile_id)
 
 async def init_driver_from_profile_playwright(profile_folder_path, log_callback=print):
     """

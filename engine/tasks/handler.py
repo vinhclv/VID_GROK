@@ -168,6 +168,8 @@ async def handle_prompt_to_image_grok_async(context, file_batch, assets_path, pr
             return (False, failed_total)
         return (True, failed_total)
     except Exception as e:
+        if e.__class__.__name__ == "RateLimitException":
+            raise e
         log_callback(f'❌ Lỗi ở handle_prompt_to_image_async: {e}')
         return (False, file_batch)
     finally:
@@ -249,6 +251,8 @@ async def handle_prompt_to_image_veo3_async(context, file_batch, assets_path, pr
 
         return (True, all_failed_objects)
     except Exception as e:
+        if e.__class__.__name__ == "RateLimitException":
+            raise e
         log_callback(f'❌ Lỗi ở handle_prompt_to_image_veo3_async: {e}')
         return (False, file_batch)
     finally:

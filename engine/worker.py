@@ -1,4 +1,5 @@
 import os
+import config
 import time
 import asyncio
 from engine.browser_ix import init_driver_from_profile_playwright
@@ -79,7 +80,16 @@ async def playwright_lifecycle_manager(profile_path, file_batch, assets_path, pr
         return is_healthy, failed_items
         
     except Exception as e:
-        log_callback(f"🔥 CRASH PLAYWRIGHT WORKER: {e}", "ERROR")
+        from utils.profile_state import RateLimitException, ProfileStateManager
+        # Check if the exception is RateLimitException (or a subclass)
+        # We check class name string to avoid deep circular import dependency issues if any
+        if e.__class__.__name__ == "RateLimitException":
+            log_callback(f"⚠️ Dính Rate Limit tạo ảnh: {e}", "WARNING")
+            p_name = os.path.basename(profile_path)
+            cooldown_mins = config.global_settings["system"].get("rate_limit_cooldown_minutes", 120)
+            ProfileStateManager().set_rate_limited(p_name, cooldown_seconds=cooldown_mins * 60)
+        else:
+            log_callback(f"🔥 CRASH PLAYWRIGHT WORKER: {e}", "ERROR")
         return False, list(file_batch)
         
     finally:

@@ -310,6 +310,28 @@ async def process_image_veo3_batch(page: Page, file_batch: list, output_folder: 
     wait_time_limit = config.global_settings["system"]["wait_time"]
     
     while time.time() - start_time < wait_time_limit:
+        # Check for rate limit
+        limit_keywords = [
+            "reached the limit", "reached your limit", "rate limit", "try again in",
+            "limit of image", "standard limit", "quota exceeded", "out of credits", "too many requests",
+            "đạt giới hạn", "vượt quá giới hạn", "thử lại sau", "đã hết lượt", "giới hạn tạo ảnh"
+        ]
+        
+        has_limit = await page.evaluate("""(keywords) => {
+            const els = Array.from(document.querySelectorAll('div, p, span, h1, h2, h3, li, button'));
+            return els.some(el => {
+                if (el.children.length > 0) return false;
+                const text = (el.textContent || '').toLowerCase();
+                return keywords.some(kw => text.includes(kw));
+            });
+        }""", limit_keywords)
+        
+        if has_limit:
+            log_callback("⚠️ [Veo3] Phát hiện thông báo giới hạn tạo ảnh (Rate Limit) trên trang Google Labs!", "WARNING")
+            from utils.profile_state import RateLimitException
+            cooldown_mins = config.global_settings["system"].get("rate_limit_cooldown_minutes", 120)
+            raise RateLimitException("Dính giới hạn tạo ảnh trên Google Labs", cooldown_seconds=cooldown_mins * 60)
+
         active_tasks = [uid for uid, info in tasks.items() if not info["done"]]
         if not active_tasks:
             log_callback("✅ [Veo3] Tất cả ảnh trong chunk này đã tải xong!")

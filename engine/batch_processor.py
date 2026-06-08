@@ -6,6 +6,7 @@ import os
 import concurrent.futures
 
 from config import DEFAULT_PROFILES
+from utils.profile_state import ProfileStateManager
 from utils.file_ops import (
     get_srt_prompt_status,
     get_prompt_image_status,
@@ -40,9 +41,13 @@ class BatchProcessor:
         max_r = config.global_settings["system"]["max_retries"]
         self.profile_health[profile_name] = max_r + 999
         self.log(f"☠️ Profile '{profile_name}' bị kill. Sẽ dừng sau task hiện tại.", "ERROR")
+        # Đồng thời cập nhật trạng thái trong ProfileStateManager
+        ProfileStateManager().set_state(profile_name, "killed", "Bị người dùng ép dừng bằng nút Kill")
  
     def run_batch_logic(self, project_queue, loop_type, profiles, finished_callback):
         self.profile_health = {p: 0 for p in profiles}
+        for p in profiles:
+            ProfileStateManager().set_rate_limit_count(p, 0)
         
         self.log(f"🚀 BẮT ĐẦU CHẠY: {len(project_queue)} DỰ ÁN", "INFO")
 
@@ -64,10 +69,18 @@ class BatchProcessor:
             self.update_status(idx, "Running ⏳")
             self.log(f"=== DỰ ÁN {idx+1}/{len(project_queue)}: {os.path.basename(input_path)} ===", "INFO")
             
-            self.process_one_folder(input_path, input2_path, output_path, prompt, url, languages, loop_type, profiles, shuffle_gems)
+            success = self.process_one_folder(input_path, input2_path, output_path, prompt, url, languages, loop_type, profiles, shuffle_gems)
             
             if self.stop_event.is_set():
                 self.update_status(idx, "Stopped 🛑")
+                break
+            elif not success:
+                self.update_status(idx, "Failed ❌")
+                self.log(f"🛑 Dừng hàng chờ chạy các dự án tiếp theo do không còn profile nào khỏe mạnh!", "ERROR")
+                # Đánh dấu các dự án còn lại trong hàng chờ là Failed
+                for remaining_idx in range(idx + 1, len(project_queue)):
+                    self.update_status(remaining_idx, "Failed ❌")
+                break
             else:
                 # Hiển thị STT bỏ qua vào cột Trạng thái
                 if self.stt_skipped:
@@ -120,18 +133,45 @@ class BatchProcessor:
             else:
                 active_pending = pending
 
-            living_profiles = [p for p in profiles if self.profile_health.get(p, 0) < config.global_settings["system"]["max_retries"]]
-            if not living_profiles:
-                self.log("❌ Hết Profile sống!", "ERROR"); break
+            # Lọc các profile khỏe mạnh và không bị rate limit
+            active_profiles = []
+            has_rate_limited = False
+            for p in profiles:
+                # Nếu profile lỗi quá số lần tối đa thì coi như chết
+                if self.profile_health.get(p, 0) >= config.global_settings["system"]["max_retries"]:
+                    continue
+                # Kiểm tra xem có đang bị rate limit hay lỗi hay không
+                p_state = ProfileStateManager().get_state(p)
+                status = p_state.get("status", "idle")
+                rl_count = p_state.get("rate_limit_count", 0)
+                max_rl_retries = config.global_settings["system"].get("max_rate_limit_retries", 3)
+                
+                if status in ["error", "killed", "failed"] or rl_count >= max_rl_retries:
+                    continue
+                if status == "rate_limited":
+                    has_rate_limited = True
+                    continue
+                active_profiles.append(p)
+
+            if not active_profiles:
+                if has_rate_limited:
+                    self.log("⏳ Tất cả profile khỏe mạnh đều đang bị giới hạn tạo ảnh (Rate Limit). Đang chờ 30 giây để kiểm tra lại...", "WARNING")
+                    # Chờ 30 giây rồi tiếp tục vòng lặp
+                    time.sleep(30)
+                    continue
+                else:
+                    self.log("❌ Không còn profile nào khỏe mạnh (tất cả đều đã vượt quá số lần thử lại tối đa)!", "ERROR")
+                    self.current_monitoring_info = None
+                    return False
 
             while not self.task_queue.empty(): self.task_queue.get()
             for f in active_pending: self.task_queue.put(f)
 
-            cur_threads = min(config.global_settings["system"]["max_threads"], len(living_profiles))
+            cur_threads = min(config.global_settings["system"]["max_threads"], len(active_profiles))
             
             with concurrent.futures.ThreadPoolExecutor(max_workers=cur_threads) as executor:
                 futures = []
-                for p_name in living_profiles: # run multiple profiles
+                for p_name in active_profiles: # run multiple profiles
                     f = executor.submit(self.continuous_profile_runner, p_name, loop_type, inp, inp2, out, prompt, url, languages, shuffle_gems)
                     futures.append(f)
                 
@@ -182,80 +222,121 @@ class BatchProcessor:
         except Exception as e:
             self.log(f"⚠️ Không kiểm tra được trạng thái cuối: {e}", "WARNING")
 
+        return True
+
     def continuous_profile_runner(self, profile_name, loop_type, inp_path, inp2_path, out_path, prompt, url, languages, shuffle_gems):
-        while not self.stop_event.is_set():
-            fails = self.profile_health.get(profile_name, 0)
-            if fails >= config.global_settings["system"]["max_retries"]:
-                self.log(f"💀 Profile '{profile_name}' chết.", "ERROR"); return 
+        # Checkout chiếm dụng profile trước khi bắt đầu chạy luồng
+        if not ProfileStateManager().checkout(profile_name, "in_batch"):
+            self.log(f"⚠️ [{profile_name}] Profile đang bận hoặc đang được setup. Bỏ qua luồng này.", "WARNING")
+            return
 
-            candidates = []
-            #srt->prompt có thể chạy nhanh nên không chia ra limit làm gì để phức tạp, chia chunk là được
-            with self.file_lock:  
-                if loop_type == "srt_prompt" or loop_type == "srt_shuffle":
-                    while not self.task_queue.empty():
-                        candidates.append(self.task_queue.get())
-                else:
-                    for _ in range(config.global_settings["system"]["loop_limit"]):
-                        if not self.task_queue.empty(): candidates.append(self.task_queue.get())
-                        else: break
-                
-                if not candidates: return
+        try:
+            while not self.stop_event.is_set():
+                # 1. Kiểm tra xem profile có bị đánh dấu rate_limited hoặc error từ bên ngoài (ví dụ do worker phát hiện lỗi API) không
+                current_state = ProfileStateManager().get_state(profile_name)
+                status = current_state.get("status", "idle")
+                if status == "error":
+                    self.log(f"💀 [{profile_name}] Profile bị lỗi hoặc dính Rate Limit quá số lần tối đa. Dừng chạy luồng.", "ERROR")
+                    break
+                elif status == "rate_limited":
+                    self.log(f"⏸️ [{profile_name}] Phát hiện profile bị Rate Limited / Cooldown. Dừng chạy luồng để bảo vệ tài khoản.", "WARNING")
+                    break
 
-                match loop_type:
-                    case "srt_prompt":
-                        actual_pending, _ = get_srt_prompt_status(inp_path, out_path)
-                        batch = actual_pending # Ném cả file vào luôn vì srt rất nhỏ
-                    case "prompt_image":
-                        actual_pending, _ = get_prompt_image_status(inp_path, inp2_path, out_path)
-                        ap_stts = [i.get("STT") for i in actual_pending]
-                        batch = [item for item in candidates if isinstance(item, dict) and item.get("STT") in ap_stts]
-                    case "1_image_prompt_video":
-                        actual_pending, _ = get_1_image_prompt_video_status(inp_path, inp2_path, out_path)
-                        ap_stts = [i.get("STT") for i in actual_pending]
-                        batch = [item for item in candidates if isinstance(item, dict) and item.get("STT") in ap_stts]
-                    case "stretch_video":
-                        actual_pending, _ = get_stretch_video_status(inp_path, inp2_path, out_path)
-                        ap_stts = [i.get("STT") for i in actual_pending]
-                        batch = [item for item in candidates if isinstance(item, dict) and item.get("STT") in ap_stts]
-                    case "image_to_video":
-                        actual_pending, _ = get_image_to_video_status(inp_path, inp2_path, out_path)
-                        ap_stts = [i.get("STT") for i in actual_pending]
-                        batch = [item for item in candidates if isinstance(item, dict) and item.get("STT") in ap_stts]
-                    case _:
-                        actual_pending, _ = [], []
-                        batch = []
-                
-            if not batch: continue
+                fails = self.profile_health.get(profile_name, 0)
+                if fails >= config.global_settings["system"]["max_retries"]:
+                    self.log(f"💀 Profile '{profile_name}' chết.", "ERROR")
+                    ProfileStateManager().set_state(profile_name, "error", f"Đã vượt quá số lần thử lại tối đa ({fails} lần)")
+                    return 
 
-            self.log(f"▶️ [{profile_name}] Nhận {len(batch)} task...", "INFO")
-            is_healthy, failed_items = run_worker_task(
-                profile_name, batch, loop_type, out_path, prompt, url, DEFAULT_PROFILES, self.stop_event, self.log
-            )
+                candidates = []
+                #srt->prompt có thể chạy nhanh nên không chia ra limit làm gì để phức tạp, chia chunk là được
+                with self.file_lock:  
+                    if loop_type == "srt_prompt" or loop_type == "srt_shuffle":
+                        while not self.task_queue.empty():
+                            candidates.append(self.task_queue.get())
+                    else:
+                        for _ in range(config.global_settings["system"]["loop_limit"]):
+                            if not self.task_queue.empty(): candidates.append(self.task_queue.get())
+                            else: break
+                    
+                    if not candidates: return
 
-            if failed_items:
-                MAX_STT_FAILS = config.global_settings.get("system", {}).get("max_stt_retries", 5)
-                retry_items = []
-                with self.file_lock:
-                    for item in failed_items:
-                        stt = str(item.get("STT", id(item)))
-                        self.stt_fail_count[stt] = self.stt_fail_count.get(stt, 0) + 1
-                        if self.stt_fail_count[stt] >= MAX_STT_FAILS:
-                            if stt not in self.stt_skipped:
-                                self.stt_skipped.append(stt)  # Track cho cột Trạng thái
-                            self.log(
-                                f"⛔ STT {stt} bỏ qua vĩnh viễn "
-                                f"(fail {self.stt_fail_count[stt]}/{MAX_STT_FAILS} lần — có thể do chính sách nội dung)",
-                                "WARNING"
-                            )
-                        else:
-                            retry_items.append(item)
-                    for item in retry_items:
-                        self.task_queue.put(item)
-                if retry_items:
-                    self.log(f"♻️ [{profile_name}] Retry {len(retry_items)} items.", "WARNING")
+                    match loop_type:
+                        case "srt_prompt":
+                            actual_pending, _ = get_srt_prompt_status(inp_path, out_path)
+                            batch = actual_pending # Ném cả file vào luôn vì srt rất nhỏ
+                        case "prompt_image":
+                            actual_pending, _ = get_prompt_image_status(inp_path, inp2_path, out_path)
+                            ap_stts = [i.get("STT") for i in actual_pending]
+                            batch = [item for item in candidates if isinstance(item, dict) and item.get("STT") in ap_stts]
+                        case "1_image_prompt_video":
+                            actual_pending, _ = get_1_image_prompt_video_status(inp_path, inp2_path, out_path)
+                            ap_stts = [i.get("STT") for i in actual_pending]
+                            batch = [item for item in candidates if isinstance(item, dict) and item.get("STT") in ap_stts]
+                        case "stretch_video":
+                            actual_pending, _ = get_stretch_video_status(inp_path, inp2_path, out_path)
+                            ap_stts = [i.get("STT") for i in actual_pending]
+                            batch = [item for item in candidates if isinstance(item, dict) and item.get("STT") in ap_stts]
+                        case "image_to_video":
+                            actual_pending, _ = get_image_to_video_status(inp_path, inp2_path, out_path)
+                            ap_stts = [i.get("STT") for i in actual_pending]
+                            batch = [item for item in candidates if isinstance(item, dict) and item.get("STT") in ap_stts]
+                        case _:
+                            actual_pending, _ = [], []
+                            batch = []
+                    
+                if not batch: continue
 
-            if is_healthy: self.profile_health[profile_name] = 0 
-            else: self.profile_health[profile_name] += 1
+                self.log(f"▶️ [{profile_name}] Nhận {len(batch)} task...", "INFO")
+                is_healthy, failed_items = run_worker_task(
+                    profile_name, batch, loop_type, out_path, prompt, url, DEFAULT_PROFILES, self.stop_event, self.log
+                )
+
+                if failed_items:
+                    MAX_STT_FAILS = config.global_settings.get("system", {}).get("max_stt_retries", 5)
+                    retry_items = []
+                    with self.file_lock:
+                        for item in failed_items:
+                            stt = str(item.get("STT", id(item)))
+                            self.stt_fail_count[stt] = self.stt_fail_count.get(stt, 0) + 1
+                            if self.stt_fail_count[stt] >= MAX_STT_FAILS:
+                                if stt not in self.stt_skipped:
+                                    self.stt_skipped.append(stt)  # Track cho cột Trạng thái
+                                self.log(
+                                    f"⛔ STT {stt} bỏ qua vĩnh viễn "
+                                    f"(fail {self.stt_fail_count[stt]}/{MAX_STT_FAILS} lần — có thể do chính sách nội dung)",
+                                    "WARNING"
+                                )
+                            else:
+                                retry_items.append(item)
+                        for item in retry_items:
+                            self.task_queue.put(item)
+                    if retry_items:
+                        self.log(f"♻️ [{profile_name}] Retry {len(retry_items)} items.", "WARNING")
+
+                # Kiểm tra trạng thái bị rate_limited ngay sau khi chạy xong worker
+                current_state = ProfileStateManager().get_state(profile_name)
+                status = current_state.get("status", "idle")
+                if status == "error":
+                    self.log(f"💀 [{profile_name}] Profile bị lỗi hoặc dính Rate Limit quá số lần tối đa. Thoát luồng chạy.", "ERROR")
+                    break
+                elif status == "rate_limited":
+                    rl_count = current_state.get("rate_limit_count", 0)
+                    max_rl = config.global_settings["system"].get("max_rate_limit_retries", 3)
+                    self.log(f"⏸️ [{profile_name}] Phát hiện profile bị Rate Limited / Cooldown (Lần {rl_count}/{max_rl}). Thoát luồng chạy.", "WARNING")
+                    break
+
+                if is_healthy: 
+                    self.profile_health[profile_name] = 0 
+                else: 
+                    self.profile_health[profile_name] += 1
+                    # Tăng số lần lỗi của profile
+                    ProfileStateManager().increment_error(profile_name, "Lỗi chạy worker task (is_healthy = False)")
+        finally:
+            # Giải phóng profile về idle nếu không bị lỗi/bị ép dừng
+            current_state = ProfileStateManager().get_state(profile_name)
+            if current_state.get("status") in ["in_batch"]:
+                ProfileStateManager().release(profile_name)
 
     def monitor_loop(self, update_ui_callback):
         last_info = None   # cache để dùng cho final scan

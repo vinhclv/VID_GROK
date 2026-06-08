@@ -73,6 +73,10 @@ class ImportProjectTab(ttk.Frame):
         # {folder_name: {"json": path, "subdirs": {name: path}, "cfg": dict}}
         self.folder_data: dict[str, dict] = {}
 
+        # Shift+Click range selection
+        self.folder_names_ordered: list[str] = []   # thứ tự hiển thị
+        self._last_clicked_idx: int | None = None   # index cúa lần click trước
+
         self.selected_mode = tk.StringVar(value=list(IMPORT_MODES.keys())[0])
         self._build_ui()
         self.refresh_gem_list()
@@ -263,9 +267,25 @@ class ImportProjectTab(ttk.Frame):
             self.btn_add.config(state="disabled")
             return
 
-        self.lbl_status.config(
-            text=f"✅  Tìm thấy {len(valid)} project hợp lệ.",
-            foreground="#6cc644")
+        # Thống kê trạng thái hoàn thành
+        n_done    = sum(1 for d in valid.values()
+                        if d.get("tc_ok", True) and d.get("char_ok", True)
+                        and len(d.get("pending", [])) == 0 and len(d.get("completed", [])) > 0)
+        n_partial = sum(1 for d in valid.values()
+                        if d.get("tc_ok", True) and d.get("char_ok", True)
+                        and len(d.get("pending", [])) > 0 and len(d.get("completed", [])) > 0)
+        n_new     = sum(1 for d in valid.values()
+                        if d.get("tc_ok", True) and d.get("char_ok", True)
+                        and len(d.get("completed", [])) == 0)
+
+        parts = [f"✅ {n_done} xong"] if n_done else []
+        if n_partial:
+            parts.append(f"🔶 {n_partial} một phần")
+        if n_new:
+            parts.append(f"🆕 {n_new} chưa làm")
+        summary = " | ".join(parts) if parts else ""
+        status_txt = f"Tìm thấy {len(valid)} project.  {summary}" if summary else f"Tìm thấy {len(valid)} project."
+        self.lbl_status.config(text=status_txt, foreground="#6cc644")
 
         for idx, (name, data) in enumerate(valid.items()):
             self._add_folder_row(idx, name, data, cfg)
@@ -312,7 +332,7 @@ class ImportProjectTab(ttk.Frame):
         try:
             entries = sorted(
                 os.listdir(root_path),
-                key=lambda x: (not x.isdigit(), x.zfill(10))
+                key=lambda x: x.lower()
             )
         except PermissionError:
             messagebox.showerror("Lỗi", "Không có quyền đọc thư mục này!")
@@ -361,6 +381,35 @@ class ImportProjectTab(ttk.Frame):
                         char_dir = found_subdirs["character"]
                         char_ok, char_err, char_bad_stts = validate_characters(json_path, char_dir)
 
+                    # Lấy pending và completed để kiểm tra xem đã xong chưa
+                    pending_tasks = []
+                    completed_tasks = []
+                    
+                    if tc_ok and char_ok:
+                        from utils.file_ops import (
+                            get_prompt_image_status,
+                            get_image_to_video_status,
+                            get_1_image_prompt_video_status,
+                            get_stretch_video_status,
+                        )
+                        loop_type = cfg["loop_type"]
+                        out_dir = os.path.join(folder_path, cfg["output_folder"])
+                        try:
+                            if loop_type == "prompt_image":
+                                img_dir = found_subdirs.get("character", "")
+                                pending_tasks, completed_tasks = get_prompt_image_status(json_path, img_dir, out_dir)
+                            elif loop_type == "image_to_video":
+                                img_dir = found_subdirs.get("output_image", "")
+                                pending_tasks, completed_tasks = get_image_to_video_status(json_path, img_dir, out_dir)
+                            elif loop_type == "1_image_prompt_video":
+                                img_dir = found_subdirs.get("character", "")
+                                pending_tasks, completed_tasks = get_1_image_prompt_video_status(json_path, img_dir, out_dir)
+                            elif loop_type == "stretch_video":
+                                video_in_dir = found_subdirs.get("output", "")
+                                pending_tasks, completed_tasks = get_stretch_video_status(json_path, video_in_dir, out_dir)
+                        except Exception as e:
+                            print(f"⚠️ Lỗi khi lấy trạng thái hoàn thành của {name}: {e}")
+
                     result[name] = {
                         "json":         json_path,
                         "subdirs":      found_subdirs,
@@ -371,6 +420,8 @@ class ImportProjectTab(ttk.Frame):
                         "char_ok":      char_ok,
                         "char_err":     char_err,
                         "char_bad_stts": char_bad_stts,
+                        "pending":      pending_tasks,
+                        "completed":    completed_tasks,
                     }
 
         return result
@@ -392,10 +443,20 @@ class ImportProjectTab(ttk.Frame):
     # RENDER ROWS
     # ─────────────────────────────────────────────
     def _add_folder_row(self, idx: int, name: str, data: dict, cfg: dict):
-        tc_ok  = data.get("tc_ok", True)
+        tc_ok   = data.get("tc_ok", True)
         char_ok = data.get("char_ok", True)
-        is_ok = tc_ok and char_ok
-        
+        is_ok   = tc_ok and char_ok
+
+        pending_tasks   = data.get("pending", [])
+        completed_tasks = data.get("completed", [])
+        n_pending   = len(pending_tasks)
+        n_completed = len(completed_tasks)
+
+        # Xác định trạng thái hoàn thành
+        # is_ok=True mới có pending/completed data
+        is_fully_done   = is_ok and n_pending == 0 and n_completed > 0
+        is_partial_done = is_ok and n_pending > 0  and n_completed > 0
+
         bg = self.ROW_EVEN if idx % 2 == 0 else self.ROW_ODD
 
         card = tk.Frame(self.scroll_frame, bg=bg, pady=5, padx=8)
@@ -404,22 +465,41 @@ class ImportProjectTab(ttk.Frame):
         card.bind("<Enter>",  lambda e, f=card: f.config(bg=self.ROW_HOVER))
         card.bind("<Leave>",  lambda e, f=card, b=bg: f.config(bg=b))
 
-        # Checkbox — disabled nếu timecode sai hoặc thiếu ảnh nhân vật
-        var = tk.BooleanVar(value=is_ok)   # sử lý: sai hoặc thiếu thì uncheck luôn
+        # Checkbox
+        # - disabled nếu timecode sai / thiếu ảnh
+        # - disabled + uncheck nếu đã hoàn thành 100%
+        default_checked = is_ok and not is_fully_done
+        var = tk.BooleanVar(value=default_checked)
         self.folder_vars[name] = var
+        self.folder_names_ordered.append(name)      # ghi nhớ thứ tự
 
-        chk = ttk.Checkbutton(card, variable=var,
-                               command=self._update_counter, cursor="hand2")
-        if not is_ok:
+        chk = ttk.Checkbutton(card, variable=var, cursor="hand2")
+        if not is_ok or is_fully_done:
             chk.state(["disabled"])        # disable, không cho chọn
+        else:
+            # Dùng ButtonRelease-1 duy nhất — chạy after(1ms) để đọc state SAU khi Tkinter toggle
+            chk.bind("<ButtonRelease-1>",
+                     lambda e, n=name: self.after(1, lambda ev=e, nm=n: self._on_chk_release(ev, nm)))
         chk.pack(side="left", padx=(0, 4))
 
         # STT
         tk.Label(card, text=f"{idx+1:>3}.", bg=bg,
                  fg="#555", font=("Segoe UI", 9), width=3).pack(side="left", padx=(0, 6))
 
-        # Folder name — vàng nếu lỗi, trắng nếu ok
-        name_color = "#ffaa00" if not is_ok else "#e0e0e0"
+        # Folder name
+        # - đỏ/vàng nếu lỗi
+        # - xanh lá nếu done 100%
+        # - cam nhạt nếu một phần
+        # - trắng nếu chưa làm
+        if not is_ok:
+            name_color = "#ffaa00"
+        elif is_fully_done:
+            name_color = "#4caf50"
+        elif is_partial_done:
+            name_color = "#ff9800"
+        else:
+            name_color = "#e0e0e0"
+
         tk.Label(card, text=name, bg=bg,
                  fg=name_color, font=("Segoe UI", 10, "bold"),
                  width=20, anchor="w").pack(side="left", padx=(0, 12))
@@ -436,8 +516,25 @@ class ImportProjectTab(ttk.Frame):
             for label in cfg["badges"]:
                 tk.Label(card, text=label, bg=bg,
                          fg="#aaaaaa", font=("Segoe UI", 8)).pack(side="left", padx=(0, 10))
+
+            # Badge trạng thái hoàn thành
+            if is_fully_done:
+                done_txt = f"✅ Đã xong ({n_completed} tasks)"
+                tk.Label(card, text=done_txt, bg=bg,
+                         fg="#4caf50", font=("Segoe UI", 8, "bold")).pack(side="left", padx=(0, 8))
+            elif is_partial_done:
+                # Hiển thị tối đa 3 STT còn thiếu (pending_tasks là list dict có key "STT")
+                sample = pending_tasks[:3]
+                suffix = f" +{n_pending - 3} nữa" if n_pending > 3 else ""
+                pending_str = ", ".join(
+                    str(t["STT"]) if isinstance(t, dict) else str(t)
+                    for t in sample
+                ) + suffix
+                partial_txt = f"🔶 Còn {n_pending} task ({pending_str})"
+                tk.Label(card, text=partial_txt, bg=bg,
+                         fg="#ff9800", font=("Segoe UI", 8, "bold")).pack(side="left", padx=(0, 8))
         else:
-            # Hiển thị các lỗi (timecode hoặc thiếu nhân vật)
+            # Hiển thị các lỗi (timecode hoặc thiếu ảnh nhân vật)
             warn_txts = []
             if not tc_ok:
                 bad_stts = data.get("tc_bad_stts", [])
@@ -507,8 +604,54 @@ class ImportProjectTab(ttk.Frame):
             w.destroy()
         self.folder_vars.clear()
         self.folder_data.clear()
+        self.folder_names_ordered.clear()
+        self._last_clicked_idx = None
         self.lbl_counter.config(text="")
         self.btn_add.config(state="disabled")
+
+    def _on_chk_release(self, event, name: str):
+        """
+        Xử lý sau khi Tkinter đã toggle var (sau 1ms).
+        Nếu Shift được giữ (event.state & 0x1) → chọn range.
+        Nếu không → ghi nhớ index và update counter.
+        """
+        is_shift = bool(event.state & 0x1)
+
+        if is_shift and self._last_clicked_idx is not None and name in self.folder_names_ordered:
+            cur_idx   = self.folder_names_ordered.index(name)
+            start     = min(self._last_clicked_idx, cur_idx)
+            end       = max(self._last_clicked_idx, cur_idx)
+            new_state = self.folder_vars[name].get()   # được toggle xong rồi
+
+            for i in range(start, end + 1):
+                n   = self.folder_names_ordered[i]
+                var = self.folder_vars.get(n)
+                if var is None:
+                    continue
+                data          = self.folder_data.get(n, {})
+                is_ok         = data.get("tc_ok", True) and data.get("char_ok", True)
+                n_pending     = len(data.get("pending", []))
+                n_completed   = len(data.get("completed", []))
+                is_fully_done = is_ok and n_pending == 0 and n_completed > 0
+                if is_ok and not is_fully_done:
+                    var.set(new_state)
+
+            self._last_clicked_idx = cur_idx
+        else:
+            # Click thường — ghi nhớ index
+            if name in self.folder_names_ordered:
+                self._last_clicked_idx = self.folder_names_ordered.index(name)
+
+        self._update_counter()
+
+    # ─── giữ lại các method cũ để tương thích (không dùng nữa nhưng không xóa)
+    def _on_click(self, name: str):
+        if name in self.folder_names_ordered:
+            self._last_clicked_idx = self.folder_names_ordered.index(name)
+        self._update_counter()
+
+    def _on_shift_click(self, name: str):
+        pass   # deprecated — thay thế bởi _on_chk_release
 
     # ─────────────────────────────────────────────
     # ADD TO QUEUE
@@ -542,6 +685,7 @@ class ImportProjectTab(ttk.Frame):
         # ── Add từng project ─────────────────────
         dashboard = self.controller.tab_dashboard
         count = 0
+        skipped_done = []   # project đã hoàn thành 100%
 
         for name in selected:
             if name not in self.folder_data:
@@ -550,6 +694,13 @@ class ImportProjectTab(ttk.Frame):
 
             # Bỏ qua nếu timecode sai hoặc thiếu ảnh nhân vật (checkbox đã disabled nhưng guard chắc chắn)
             if not data.get("tc_ok", True) or not data.get("char_ok", True):
+                continue
+
+            # Bỏ qua nếu project đã hoàn thành 100%
+            pending_tasks   = data.get("pending", [])
+            completed_tasks = data.get("completed", [])
+            if len(pending_tasks) == 0 and len(completed_tasks) > 0:
+                skipped_done.append(name)
                 continue
 
             # input2: folder nguồn (character/ hoặc output/)
@@ -570,6 +721,15 @@ class ImportProjectTab(ttk.Frame):
                 gem_name = gem_name,
             )
             count += 1
+
+        # Log các project đã bỏ qua vì hoàn thành 100%
+        if skipped_done:
+            for done_name in skipped_done:
+                n_done = len(self.folder_data[done_name].get("completed", []))
+                self.controller.log(
+                    f"✅ [{done_name}] Đã hoàn thành ({n_done} tasks) — Bỏ qua.",
+                    "INFO"
+                )
 
 
         mode_label = self.selected_mode.get()

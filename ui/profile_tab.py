@@ -9,6 +9,7 @@ import config
 
 import asyncio
 from engine.browser_ix  import init_driver_from_profile_playwright
+from utils.profile_state import ProfileStateManager
 
 class ProfileManagerTab(ttk.Frame):
     def __init__(self, parent, profiles_dir, kill_callback=None):
@@ -23,9 +24,106 @@ class ProfileManagerTab(ttk.Frame):
         # Dictionary to store Checkbox variables for each profile
         # Key: Profile Name, Value: tk.BooleanVar
         self.profile_vars = {} 
+        self.card_widgets = {}  # Lưu trữ các widget của mỗi card để cập nhật trạng thái
 
         self.setup_ui()
         self.refresh_list()
+        
+        # Khởi chạy cập nhật trạng thái thời gian thực
+        self.poll_status()
+
+    def poll_status(self):
+        """Cơ chế polling cập nhật trạng thái UI định kỳ"""
+        if self.winfo_exists():
+            self.update_ui_states()
+            self.after(1000, self.poll_status)
+
+    def update_ui_states(self):
+        """Cập nhật giao diện của các profile card theo trạng thái thực tế từ ProfileStateManager"""
+        states = ProfileStateManager().get_all_states()
+        
+        for p_name, widgets in self.card_widgets.items():
+            state_info = states.get(p_name, {"status": "idle", "error_count": 0})
+            status = state_info.get("status", "idle")
+            err_count = state_info.get("error_count", 0)
+
+            # Xác định nhãn hiển thị và màu sắc
+            if status == "idle":
+                status_text = "Rảnh rỗi (Idle)"
+                status_fg = "#00cc6a" # Xanh lá
+            elif status == "in_setup":
+                status_text = "Đang Setup thủ công"
+                status_fg = "#ffaa00" # Vàng
+            elif status == "in_batch":
+                if err_count > 0:
+                    status_text = f"Đang chạy Batch (Lỗi: {err_count})"
+                else:
+                    status_text = "Đang chạy Batch"
+                status_fg = "#00d4ff" # Xanh dương
+            elif status == "killed":
+                status_text = "Đã dừng (Killed)"
+                status_fg = "#ff5555" # Đỏ sẫm
+            elif status == "rate_limited":
+                until = state_info.get("rate_limit_until", 0.0)
+                remaining = max(0, int(until - time.time()))
+                if remaining > 0:
+                    mins = remaining // 60
+                    secs = remaining % 60
+                    status_text = f"Rate Limited (Chờ {mins}m {secs}s)"
+                else:
+                    status_text = "Rảnh rỗi (Idle)"
+                status_fg = "#ff9900" # Cam
+            elif status == "error":
+                last_err = state_info.get("last_error", "")
+                if "Rate Limit" in str(last_err):
+                    status_text = "Lỗi (Max Rate Limit)"
+                else:
+                    status_text = f"Lỗi (Fails: {err_count})"
+                status_fg = "#ff3333" # Đỏ tươi
+            else:
+                status_text = status.capitalize()
+                status_fg = "#cccccc"
+
+            # Cập nhật nhãn trạng thái
+            try:
+                widgets["lbl_status"].config(text=status_text, foreground=status_fg)
+            except Exception:
+                pass
+
+            # Bật/Tắt các nút bấm tương ứng
+            if status in ["in_setup", "in_batch"]:
+                try: widgets["chk"].config(state="disabled")
+                except: pass
+                try: widgets["btn_setup"].config(state="disabled")
+                except: pass
+                try: widgets["btn_del"].config(state="disabled")
+                except: pass
+                if widgets.get("entry_proxy"):
+                    try: widgets["entry_proxy"].config(state="disabled")
+                    except: pass
+                
+                # Chỉ mở nút ☠️ Kill nếu đang chạy batch
+                if status == "in_batch":
+                    try: widgets["btn_kill"].config(state="normal", text="☠️")
+                    except: pass
+                else:
+                    try: widgets["btn_kill"].config(state="disabled")
+                    except: pass
+            else:
+                # Profile rảnh rỗi, có lỗi, hoặc rate_limited
+                try: widgets["chk"].config(state="normal")
+                except: pass
+                try: widgets["btn_setup"].config(state="normal")
+                except: pass
+                try: widgets["btn_del"].config(state="normal")
+                except: pass
+                try: widgets["btn_kill"].config(state="disabled", text="☠️")
+                except: pass
+                if widgets.get("entry_proxy"):
+                    try: widgets["entry_proxy"].config(state="normal")
+                    except: pass
+                try: widgets["lbl_name"].config(foreground="white")
+                except: pass
 
     # -------------------------------------------------------
     # Proxy Map helpers
@@ -65,30 +163,12 @@ class ProfileManagerTab(ttk.Frame):
             return
 
         # Gan proxy xoay vong: profiles[i] <- proxies[i % len(proxies)]
-        proxy_map = self._load_proxy_map()
+        proxy_map = {}
         for i, profile in enumerate(profiles):
             proxy_map[profile] = proxies[i % len(proxies)]
 
-        self._save_proxy_map(proxy_map)
+        ProfileStateManager().set_proxies(proxy_map)
         self.refresh_list()
-
-    def _load_proxy_map(self):
-        """Đọc proxy_map.json từ thư mục profiles"""
-        path = os.path.join(self.profiles_dir, "proxy_map.json")
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except:
-            return {}
-
-    def _save_proxy_map(self, proxy_map):
-        """Ghi proxy_map.json"""
-        path = os.path.join(self.profiles_dir, "proxy_map.json")
-        try:
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(proxy_map, f, indent=2, ensure_ascii=False)
-        except Exception as e:
-            print(f"Khong luu duoc proxy_map: {e}")
 
     def setup_ui(self):
         # === 1. TOOLBAR (TOP BAR) ===
@@ -104,7 +184,7 @@ class ProfileManagerTab(ttk.Frame):
         
         # Select All / Refresh Buttons
         ttk.Button(frame_top, text="☑️ Select All", command=self.select_all).pack(side="right", padx=5)
-        ttk.Button(frame_top, text="🔄 Refresh", command=self.refresh_list).pack(side="right", padx=5)
+        ttk.Button(frame_top, text="🔄 Refresh", command=self.manual_refresh).pack(side="right", padx=5)
         ttk.Button(frame_top, text="📥 Proxy List", command=self.import_proxy_list).pack(side="right", padx=5)
 
         ttk.Separator(self, orient="horizontal").pack(fill="x")
@@ -131,6 +211,11 @@ class ProfileManagerTab(ttk.Frame):
     def _on_mousewheel(self, event):
         self.canvas.yview_scroll(int(-1*(event.delta/120)), "units")
 
+    def manual_refresh(self):
+        """Khôi phục tất cả trạng thái về idle, reset đếm lỗi và tải lại danh sách"""
+        ProfileStateManager().reset_all()
+        self.refresh_list()
+
     def refresh_list(self):
         """Redraw the entire profile list"""
         # Clear old widgets
@@ -139,6 +224,10 @@ class ProfileManagerTab(ttk.Frame):
         
         # Clear old checkbox data
         self.profile_vars.clear()
+        self.card_widgets.clear()
+
+        # Đồng bộ hóa danh sách từ thư mục ổ cứng
+        ProfileStateManager().sync_with_disk()
 
         if os.path.exists(self.profiles_dir):
             folders = sorted([f for f in os.listdir(self.profiles_dir) if os.path.isdir(os.path.join(self.profiles_dir, f))])
@@ -156,9 +245,15 @@ class ProfileManagerTab(ttk.Frame):
         card.pack(fill="x", expand=True, padx=10, pady=2, anchor="n")
 
         # --- PROFILE SELECTION CHECKBOX ---
-        var = tk.BooleanVar(value=True)
+        state_info = ProfileStateManager().get_state(profile_name)
+        is_selected = state_info.get("selected", True)
+        var = tk.BooleanVar(value=is_selected)
         self.profile_vars[profile_name] = var
-        chk = ttk.Checkbutton(card, variable=var)
+        
+        def _on_toggle(p=profile_name, v=var):
+            ProfileStateManager().set_selected(p, v.get())
+            
+        chk = ttk.Checkbutton(card, variable=var, command=_on_toggle)
         chk.pack(side="left", padx=5)
 
         # Icon & Name
@@ -167,6 +262,10 @@ class ProfileManagerTab(ttk.Frame):
 
         lbl_name = ttk.Label(card, text=profile_name, font=("Segoe UI", 10, "bold"))
         lbl_name.pack(side="left", padx=5)
+
+        # Trạng thái Badge (nhãn hiển thị)
+        lbl_status = ttk.Label(card, text="Idle", font=("Segoe UI", 9, "italic"))
+        lbl_status.pack(side="left", padx=15)
 
         # --- RIGHT SIDE: pack buttons first so they claim right space ---
         btn_del = ttk.Button(card, text="🗑️", width=3, command=lambda p=profile_name: self.delete_profile(p))
@@ -178,7 +277,8 @@ class ProfileManagerTab(ttk.Frame):
                 self.kill_callback(p)
             else:
                 print(f"Kill: Khong co batch dang chay")
-            # Visual: ten do + button chuyen sang ky hieu chet + disable
+            # Cập nhật trạng thái sang bị ép dừng (killed)
+            ProfileStateManager().set_state(p, "killed", "Bị người dùng ép dừng bằng nút Kill")
             try:
                 lbl.config(foreground="#ff5555")
                 btn_kill.config(text="💀", state="disabled")
@@ -201,9 +301,9 @@ class ProfileManagerTab(ttk.Frame):
 
         # --- PROXY ENTRY (middle, fills remaining space) ---
         browser_type = config.global_settings["system"].get("browser_type", "ixBrowser")
+        entry_proxy = None
         if browser_type == "ixBrowser":
-            proxy_map     = self._load_proxy_map()
-            current_proxy = proxy_map.get(profile_name, "")
+            current_proxy = ProfileStateManager().get_proxy(profile_name)
 
             entry_proxy = ttk.Entry(card, width=28)
             if current_proxy:
@@ -221,19 +321,28 @@ class ProfileManagerTab(ttk.Frame):
 
             def _focus_out(e):
                 val = entry_proxy.get().strip()
-                pm  = self._load_proxy_map()
                 if not val or val == "host:port:user:pass":
                     entry_proxy.delete(0, tk.END)
                     entry_proxy.insert(0, "host:port:user:pass")
                     entry_proxy.config(foreground="#888")
-                    pm.pop(profile_name, None)
+                    ProfileStateManager().set_proxy(profile_name, "")
                 else:
                     entry_proxy.config(foreground="white")
-                    pm[profile_name] = val
-                self._save_proxy_map(pm)
+                    ProfileStateManager().set_proxy(profile_name, val)
 
             entry_proxy.bind("<FocusIn>",  _focus_in)
             entry_proxy.bind("<FocusOut>", _focus_out)
+
+        # Đăng ký widget để quản lý trạng thái
+        self.card_widgets[profile_name] = {
+            "chk": chk,
+            "lbl_name": lbl_name,
+            "lbl_status": lbl_status,
+            "btn_del": btn_del,
+            "btn_kill": btn_kill,
+            "btn_setup": btn_setup,
+            "entry_proxy": entry_proxy
+        }
 
     def _update_size_label(self, path, card_frame):
         """Calculate folder size and update label (Thread safe way)"""
@@ -260,8 +369,9 @@ class ProfileManagerTab(ttk.Frame):
         """Select all or Deselect all"""
         any_unchecked = any(not var.get() for var in self.profile_vars.values())
         new_val = True if any_unchecked else False
-        for var in self.profile_vars.values():
+        for name, var in self.profile_vars.items():
             var.set(new_val)
+            ProfileStateManager().set_selected(name, new_val)
 
     def add_profile(self):
         name = self.entry_name.get().strip()
@@ -281,6 +391,8 @@ class ProfileManagerTab(ttk.Frame):
 
         os.makedirs(new_path)
         self.entry_name.delete(0, tk.END)
+        # Đồng bộ hóa với ổ cứng và vẽ lại danh sách
+        ProfileStateManager().sync_with_disk()
         self.refresh_list()
 
     def import_profile(self):
@@ -308,6 +420,8 @@ class ProfileManagerTab(ttk.Frame):
                 if os.path.exists(local_state_path):
                     try: os.remove(local_state_path)
                     except: pass
+                # Đồng bộ hóa
+                ProfileStateManager().sync_with_disk()
                 self.after(0, self.refresh_list)
             
             threading.Thread(target=copy_task, daemon=True).start()
@@ -315,15 +429,27 @@ class ProfileManagerTab(ttk.Frame):
             messagebox.showerror("Import Error", str(e))
 
     def delete_profile(self, profile_name):
+        state = ProfileStateManager().get_state(profile_name)
+        if state.get("status") in ["in_setup", "in_batch"]:
+            messagebox.showerror("Lỗi", f"Profile '{profile_name}' đang bận hoạt động, không thể xóa!")
+            return
+
         confirm = messagebox.askyesno("Confirm", f"Permanently delete profile '{profile_name}'?")
         if confirm:
             try:
                 shutil.rmtree(os.path.join(self.profiles_dir, profile_name))
+                # Đồng bộ hóa
+                ProfileStateManager().sync_with_disk()
                 self.refresh_list()
             except Exception as e:
                 messagebox.showerror("Error", f"Cannot delete: {e}")
 
     def open_browser_setup(self, profile_name):
+        # Checkout chiếm dụng profile
+        if not ProfileStateManager().checkout(profile_name, "in_setup"):
+            messagebox.showwarning("Cảnh báo", f"Profile '{profile_name}' đang bận sử dụng!")
+            return
+
         profile_path = os.path.join(self.profiles_dir, profile_name)
 
         async def _run_async():
@@ -331,6 +457,7 @@ class ProfileManagerTab(ttk.Frame):
             context = await init_driver_from_profile_playwright(profile_path, log_callback=print)
             if not context:
                 print("Failed to open browser")
+                ProfileStateManager().set_state(profile_name, "error", "Không thể khởi động trình duyệt")
                 return
             try:
                 # Mở thẳng trang Gemini để setup trên tab đầu tiên (được tự động gắn nhãn tiêu đề profile)
@@ -351,11 +478,14 @@ class ProfileManagerTab(ttk.Frame):
                 print(f"Setup {profile_name} closed.")
             except Exception as e:
                 print(f"Browser Error: {e}")
+                ProfileStateManager().set_state(profile_name, "error", f"Trình duyệt gặp lỗi: {e}")
             finally:
                 try:
                     await context.close()
                     await context.playwright_instance.stop()
                 except: pass
+                # Giải phóng profile về idle
+                ProfileStateManager().release(profile_name)
 
         def run_browser():
             asyncio.run(_run_async())

@@ -17,61 +17,105 @@ class SettingsTab(ttk.Frame):
         paned.pack(fill="both", expand=True, padx=10, pady=10)
 
         # --- PHẦN TRÁI: CẤU HÌNH HỆ THỐNG (SIDEBAR) ---
-        left_frame = ttk.LabelFrame(paned, text="⚙️ Cấu hình Hệ thống", padding=10)
+        left_frame = ttk.LabelFrame(paned, text="⚙️ Cấu hình Hệ thống", padding=0)
         paned.add(left_frame, weight=1) 
+
+        # Tạo Canvas và Scrollbar để hỗ trợ cuộn
+        canvas = tk.Canvas(left_frame, borderwidth=0, highlightthickness=0, bg="#1c1c1c")
+        scrollbar = ttk.Scrollbar(left_frame, orient="vertical", command=canvas.yview)
+        
+        scrollable_content = ttk.Frame(canvas, padding=10)
+        scrollable_content.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=(0, 0, e.width, e.height))
+        )
+
+        window_item = canvas.create_window((0, 0), window=scrollable_content, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        scrollbar.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+
+        # Căn chỉnh chiều rộng tự động cho Frame chứa nội dung để grid stretch hoạt động chuẩn
+        def _configure_canvas_width(event):
+            canvas.itemconfig(window_item, width=event.width)
+        canvas.bind("<Configure>", _configure_canvas_width)
 
         # Dàn các control theo chiều dọc (Grid layout)
         
         # 1. Threads
-        tk.Label(left_frame, text="Max Threads:", anchor="w").grid(row=0, column=0, sticky="w", pady=(10, 5))
+        tk.Label(scrollable_content, text="Max Threads:", anchor="w").grid(row=0, column=0, sticky="w", pady=(10, 5))
         self.var_threads = tk.IntVar(value=self.settings["system"].get("max_threads", 3))
-        ttk.Spinbox(left_frame, from_=1, to=20, textvariable=self.var_threads, width=15).grid(row=1, column=0, sticky="ew")
+        ttk.Spinbox(scrollable_content, from_=1, to=20, textvariable=self.var_threads, width=15).grid(row=1, column=0, sticky="ew")
 
         # 2. Batch Loop
-        tk.Label(left_frame, text="Loop Limit (Batch):", anchor="w").grid(row=2, column=0, sticky="w", pady=(15, 5))
+        tk.Label(scrollable_content, text="Loop Limit (Batch):", anchor="w").grid(row=2, column=0, sticky="w", pady=(15, 5))
         self.var_limit = tk.IntVar(value=self.settings["system"].get("loop_limit", 5))
-        ttk.Spinbox(left_frame, from_=1, to=100, textvariable=self.var_limit, width=15).grid(row=3, column=0, sticky="ew")
+        ttk.Spinbox(scrollable_content, from_=1, to=100, textvariable=self.var_limit, width=15).grid(row=3, column=0, sticky="ew")
 
         # 3. Retries
-        tk.Label(left_frame, text="Max Retries:", anchor="w").grid(row=4, column=0, sticky="w", pady=(15, 5))
+        tk.Label(scrollable_content, text="Max Retries:", anchor="w").grid(row=4, column=0, sticky="w", pady=(15, 5))
         self.var_retries = tk.IntVar(value=self.settings["system"].get("max_retries", 30))
-        ttk.Entry(left_frame, textvariable=self.var_retries, width=15).grid(row=5, column=0, sticky="ew")
+        ttk.Entry(scrollable_content, textvariable=self.var_retries, width=15).grid(row=5, column=0, sticky="ew")
 
         # 4. Max STT Retries
-        tk.Label(left_frame, text="Max STT Retries:", anchor="w").grid(row=6, column=0, sticky="w", pady=(15, 5))
+        tk.Label(scrollable_content, text="Max STT Retries:", anchor="w").grid(row=6, column=0, sticky="w", pady=(15, 5))
         self.var_stt_retries = tk.IntVar(value=self.settings["system"].get("max_stt_retries", 5))
-        ttk.Spinbox(left_frame, from_=1, to=20, textvariable=self.var_stt_retries, width=15).grid(row=7, column=0, sticky="ew")
+        ttk.Spinbox(scrollable_content, from_=1, to=20, textvariable=self.var_stt_retries, width=15).grid(row=7, column=0, sticky="ew")
 
         # 5. Wait Time
-        tk.Label(left_frame, text="Wait Time (s):", anchor="w").grid(row=8, column=0, sticky="w", pady=(15, 5))
+        tk.Label(scrollable_content, text="Wait Time (s):", anchor="w").grid(row=8, column=0, sticky="w", pady=(15, 5))
         self.var_wait_time = tk.IntVar(value=self.settings["system"].get("wait_time", 5))
-        ttk.Spinbox(left_frame, from_=1, to=60, textvariable=self.var_wait_time, width=15).grid(row=9, column=0, sticky="ew")
+        ttk.Spinbox(scrollable_content, from_=1, to=60, textvariable=self.var_wait_time, width=15).grid(row=9, column=0, sticky="ew")
 
         # 6. Aspect Ratio (Grok Video)
-        tk.Label(left_frame, text="Aspect Ratio (Grok):", anchor="w").grid(row=10, column=0, sticky="w", pady=(15, 5))
+        tk.Label(scrollable_content, text="Aspect Ratio (Grok):", anchor="w").grid(row=10, column=0, sticky="w", pady=(15, 5))
         self.var_aspect_ratio = tk.StringVar(value=self.settings["system"].get("aspect_ratio", "16:9"))
-        cb_ar = ttk.Combobox(left_frame, textvariable=self.var_aspect_ratio, values=["16:9", "9:16", "1:1"], state="readonly", width=13)
+        cb_ar = ttk.Combobox(scrollable_content, textvariable=self.var_aspect_ratio, values=["16:9", "9:16", "1:1"], state="readonly", width=13)
         cb_ar.grid(row=11, column=0, sticky="ew")
 
         # 7. Resolution (Grok Video)
-        tk.Label(left_frame, text="Resolution (Grok):", anchor="w").grid(row=12, column=0, sticky="w", pady=(15, 5))
+        tk.Label(scrollable_content, text="Resolution (Grok):", anchor="w").grid(row=12, column=0, sticky="w", pady=(15, 5))
         self.var_resolution = tk.StringVar(value=self.settings["system"].get("resolution", "720p"))
-        cb_res = ttk.Combobox(left_frame, textvariable=self.var_resolution, values=["720p", "1080p", "480p"], state="readonly", width=13)
+        cb_res = ttk.Combobox(scrollable_content, textvariable=self.var_resolution, values=["720p", "1080p", "480p"], state="readonly", width=13)
         cb_res.grid(row=13, column=0, sticky="ew")
 
         # 8. Browser Type (ixBrowser / GoLogin)
-        tk.Label(left_frame, text="Loại Trình Duyệt:", anchor="w").grid(row=14, column=0, sticky="w", pady=(15, 5))
+        tk.Label(scrollable_content, text="Loại Trình Duyệt:", anchor="w").grid(row=14, column=0, sticky="w", pady=(15, 5))
         self.var_browser_type = tk.StringVar(value=self.settings["system"].get("browser_type", "ixBrowser"))
-        cb_browser = ttk.Combobox(left_frame, textvariable=self.var_browser_type, values=["ixBrowser", "GoLogin"], state="readonly", width=13)
+        cb_browser = ttk.Combobox(scrollable_content, textvariable=self.var_browser_type, values=["ixBrowser", "GoLogin"], state="readonly", width=13)
         cb_browser.grid(row=15, column=0, sticky="ew")
 
-        # Nút Save nằm dưới cùng, giãn cách xa một chút
-        ttk.Separator(left_frame, orient='horizontal').grid(row=16, column=0, sticky="ew", pady=20)
-        
-        ttk.Button(left_frame, text="💾 LƯU CẤU HÌNH", style="Accent.TButton", command=self.save_settings).grid(row=17, column=0, sticky="ew", pady=5)
-        ttk.Button(left_frame, text="🔄 Mặc định", command=self.reset_defaults).grid(row=18, column=0, sticky="ew")
+        # 9. Rate Limit Cooldown (m)
+        tk.Label(scrollable_content, text="Rate Limit Cooldown (m):", anchor="w").grid(row=16, column=0, sticky="w", pady=(15, 5))
+        self.var_cooldown = tk.IntVar(value=self.settings["system"].get("rate_limit_cooldown_minutes", 120))
+        ttk.Spinbox(scrollable_content, from_=1, to=1440, textvariable=self.var_cooldown, width=15).grid(row=17, column=0, sticky="ew")
 
-        left_frame.columnconfigure(0, weight=1) # Để các input giãn full bề ngang cột trái
+        # 10. Max Rate Limit Retries
+        tk.Label(scrollable_content, text="Max Rate Limit Retries:", anchor="w").grid(row=18, column=0, sticky="w", pady=(15, 5))
+        self.var_max_rate_limit_retries = tk.IntVar(value=self.settings["system"].get("max_rate_limit_retries", 3))
+        ttk.Spinbox(scrollable_content, from_=1, to=100, textvariable=self.var_max_rate_limit_retries, width=15).grid(row=19, column=0, sticky="ew")
+
+        # Nút Save nằm dưới cùng, giãn cách xa một chút
+        ttk.Separator(scrollable_content, orient='horizontal').grid(row=20, column=0, sticky="ew", pady=20)
+        
+        ttk.Button(scrollable_content, text="💾 LƯU CẤU HÌNH", style="Accent.TButton", command=self.save_settings).grid(row=21, column=0, sticky="ew", pady=5)
+        ttk.Button(scrollable_content, text="🔄 Mặc định", command=self.reset_defaults).grid(row=22, column=0, sticky="ew")
+
+        scrollable_content.columnconfigure(0, weight=1) # Để các input giãn full bề ngang cột trái
+
+        # Bind mousewheel recursively to all widgets in the left pane to scroll the canvas
+        def _on_mousewheel_left(event):
+            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+            return "break"
+
+        def _bind_mousewheel_recursive(w):
+            w.bind("<MouseWheel>", _on_mousewheel_left)
+            for child in w.winfo_children():
+                _bind_mousewheel_recursive(child)
+        
+        _bind_mousewheel_recursive(scrollable_content)
+        canvas.bind("<MouseWheel>", _on_mousewheel_left)
 
 
         # --- PHẦN PHẢI: QUẢN LÝ DỰ ÁN & GEM (CONTENT) ---
@@ -274,6 +318,8 @@ class SettingsTab(ttk.Frame):
         config.global_settings["system"]["aspect_ratio"] = self.var_aspect_ratio.get()
         config.global_settings["system"]["resolution"] = self.var_resolution.get()
         config.global_settings["system"]["browser_type"] = self.var_browser_type.get()
+        config.global_settings["system"]["rate_limit_cooldown_minutes"] = self.var_cooldown.get()
+        config.global_settings["system"]["max_rate_limit_retries"] = self.var_max_rate_limit_retries.get()
 
         if config.save_config():
             messagebox.showinfo("Thành công", "Đã lưu cấu hình!")
@@ -297,6 +343,8 @@ class SettingsTab(ttk.Frame):
             self.var_aspect_ratio.set(config.global_settings["system"].get("aspect_ratio", "16:9"))
             self.var_resolution.set(config.global_settings["system"].get("resolution", "720p"))
             self.var_browser_type.set(config.global_settings["system"].get("browser_type", "ixBrowser"))
+            self.var_cooldown.set(config.global_settings["system"].get("rate_limit_cooldown_minutes", 120))
+            self.var_max_rate_limit_retries.set(config.global_settings["system"].get("max_rate_limit_retries", 3))
             self._load_gems_to_tree()
             self._refresh_project_combobox()
             config.save_config()
