@@ -1,6 +1,6 @@
 import os
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
+from tkinter import ttk, filedialog, messagebox, simpledialog
 
 import config
 
@@ -31,11 +31,11 @@ IMPORT_MODES = {
         "validate_timecode": True,
     },
     "Image + Prompt ➡ Video": {
-        "required_subdirs":  ["character", "output"],
+        "required_subdirs":  ["character"],
         "input2_folder":     "character",
         "output_folder":     "output",
-        "auto_create_out":   False,
-        "badges":            ["📸 character/", "📤 output/"],
+        "auto_create_out":   True,
+        "badges":            ["📸 character/", "📤 output/ (auto)"],
         "loop_type":         "1_image_prompt_video",
         "need_gem":          True,
         "validate_timecode": True,   # Kiểm tra timecode trong JSON khi quét
@@ -51,6 +51,26 @@ IMPORT_MODES = {
         "validate_timecode": True,   # Kiểm tra timecode trong JSON khi quét
     },
 }
+
+
+class SuffixDialog(simpledialog.Dialog):
+    def __init__(self, parent, title, prompt):
+        self.prompt = prompt
+        self.result = None
+        super().__init__(parent, title)
+
+    def body(self, master):
+        lbl = ttk.Label(master, text=self.prompt, font=("Segoe UI", 9))
+        lbl.pack(padx=15, pady=(15, 5), anchor="w")
+        
+        self.cbo = ttk.Combobox(master, values=["_storyboard_json", "_hook_json"], width=35)
+        self.cbo.pack(padx=15, pady=(0, 15), fill="x")
+        self.cbo.set("_storyboard_json")  # Mặc định chọn _storyboard_json
+        
+        return self.cbo  # Focus vào combobox
+
+    def apply(self):
+        self.result = self.cbo.get()
 
 
 class ImportProjectTab(ttk.Frame):
@@ -251,12 +271,12 @@ class ImportProjectTab(ttk.Frame):
                                    "Vui lòng chọn thư mục gốc hợp lệ!")
             return
 
-        from tkinter import simpledialog
-        suffix = simpledialog.askstring(
-            "Nhập hậu tố",
-            "Nhập hậu tố của file JSON cần quét (ví dụ: _storyboard_json):",
-            parent=self
+        dialog = SuffixDialog(
+            self,
+            "Chọn hậu tố JSON",
+            "Chọn hoặc nhập hậu tố của file JSON cần quét:"
         )
+        suffix = dialog.result
         if suffix is None:
             return
         suffix = suffix.strip()
