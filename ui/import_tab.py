@@ -251,12 +251,22 @@ class ImportProjectTab(ttk.Frame):
                                    "Vui lòng chọn thư mục gốc hợp lệ!")
             return
 
+        from tkinter import simpledialog
+        suffix = simpledialog.askstring(
+            "Nhập hậu tố",
+            "Nhập hậu tố của file JSON cần quét (ví dụ: _storyboard_json):",
+            parent=self
+        )
+        if suffix is None:
+            return
+        suffix = suffix.strip()
+
         cfg = IMPORT_MODES[self.selected_mode.get()]
         self._clear_list()
         self.lbl_status.config(text="⏳ Đang quét...", foreground="#ffb86c")
         self.update_idletasks()
 
-        valid = self._find_valid_folders(root_path, cfg)
+        valid = self._find_valid_folders(root_path, cfg, suffix=suffix)
 
         if not valid:
             req = " + ".join(f"'{s}/'" for s in cfg["required_subdirs"])
@@ -323,9 +333,9 @@ class ImportProjectTab(ttk.Frame):
                     )
 
 
-    def _find_valid_folders(self, root_path: str, cfg: dict) -> dict:
+    def _find_valid_folders(self, root_path: str, cfg: dict, suffix: str = "") -> dict:
         """
-        Generic scanner: hợp lệ khi có đúng 1 .json và tất cả required_subdirs tồn tại.
+        Generic scanner: hợp lệ khi tìm được file json phù hợp và tất cả required_subdirs tồn tại.
         Trả về {folder_name: {"json": path, "subdirs": {name: path}}}
         """
         result = {}
@@ -351,12 +361,21 @@ class ImportProjectTab(ttk.Frame):
                     break
                 found_subdirs[sub] = path
             else:
-                # Tìm đúng 1 file .json
-                json_files = [
-                    f for f in os.listdir(folder_path)
-                    if f.lower().endswith(".json")
-                    and os.path.isfile(os.path.join(folder_path, f))
-                ]
+                if suffix:
+                    expected_json_name = f"{name}{suffix}.json"
+                    json_path = os.path.join(folder_path, expected_json_name)
+                    if os.path.exists(json_path) and os.path.isfile(json_path):
+                        json_files = [expected_json_name]
+                    else:
+                        json_files = []
+                else:
+                    # Tìm đúng 1 file .json (logic gốc)
+                    json_files = [
+                        f for f in os.listdir(folder_path)
+                        if f.lower().endswith(".json")
+                        and os.path.isfile(os.path.join(folder_path, f))
+                    ]
+
                 if len(json_files) == 1:
                     json_path = os.path.join(folder_path, json_files[0])
 
