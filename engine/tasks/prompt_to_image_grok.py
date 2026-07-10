@@ -16,7 +16,7 @@ async def setup_image_format_ui(page: Page):
     """
     # 0. Chuyển sang tab Hình ảnh (Image)
     try:
-        btn_img = page.locator("button:text-is('Hình ảnh'), button:has-text('Hình ảnh'), button:text-is('Image'), button:has-text('Image')").first
+        btn_img = page.locator("button[role='radio']:has(span:text-is('Image')), button[role='radio']:has(span:text-is('Hình ảnh'))").first
         if await btn_img.is_visible(timeout=2000):
             await human_click(btn_img, page)
             await page.wait_for_timeout(1000)
@@ -28,8 +28,8 @@ async def setup_image_format_ui(page: Page):
     aspect_ratio = system_cfg.get('aspect_ratio', '16:9') # Mặc định 16:9
 
     try:
-        # Tìm nút dropdown tỉ lệ khung hình (chứa dấu hai chấm như 16:9, 9:16, 1:1, 2:3, 3:2, 4:3, v.v.)
-        dropdown_btn = page.locator("button:has-text(':')").first
+        # Tìm nút dropdown tỉ lệ khung hình (match pattern số:số như 16:9, 9:16, 1:1, 2:3, v.v.)
+        dropdown_btn = page.locator("button", has_text=re.compile(r"^\d+:\d+$")).first
         if await dropdown_btn.is_visible(timeout=2000):
             current_text = await dropdown_btn.inner_text()
             if aspect_ratio not in current_text:
@@ -132,17 +132,17 @@ async def process_prompt_to_image_grok_async(page: Page, item: dict, log_callbac
 
         os.makedirs(output_folder, exist_ok=True)
 
-        # --- 0. CLICK NÚT SAVED ĐỂ DỌN CONTEXT / PARENT ID TRANH BỊ DÍNH ---
+        # --- 0. CLICK NÚT HISTORY ĐỂ DỌN CONTEXT / PARENT ID TRANH BỊ DÍNH ---
         try:
-            btn_saved = page.locator("button[aria-label='Saved'], button[aria-label='Đã lưu'], button:has-text('Saved'), button:has-text('Đã lưu')").first
-            if await btn_saved.is_visible(timeout=3000):
-                await human_click(btn_saved, page)
-                log_callback(f"➡️ Đã click nút Đã lưu (Saved)(STT {stt})")
+            btn_history = page.locator("button[data-tour-id='imagine-tour-history'], button:has-text('History'), button:has-text('Lịch sử')").first
+            if await btn_history.is_visible(timeout=3000):
+                await human_click(btn_history, page)
+                log_callback(f"➡️ Đã click nút History (STT {stt})")
                 await page.wait_for_timeout(random.uniform(2000, 3000))
             else:
-                log_callback(f"⚠️ Không tìm thấy nút Saved trên UI (STT {stt}).")
+                log_callback(f"⚠️ Không tìm thấy nút History trên UI (STT {stt}).")
         except Exception as e:
-            log_callback(f"⚠️ Lỗi click chuyển context /saved (STT {stt}): {e}")
+            log_callback(f"⚠️ Lỗi click chuyển context History (STT {stt}): {e}")
 
         # --- ĐĂNG KÝ BỘ CHẶN NETWORK NATIVE ĐỂ TỰ ĐỘNG BẮT ẢNH ---
         if not hasattr(page, 'grok_image_urls'):
@@ -489,6 +489,8 @@ async def process_prompt_to_image_grok_async(page: Page, item: dict, log_callbac
             return False
 
         # --- 9. TẢI ẢNH BẰNG HỆ THỐNG PHÁT HIỆN & GIẢI MÃ DOM SIÊU GỌN ---
+        # Đợi 2 giây cho ảnh render xong chất lượng cao (tránh tải ảnh preview mờ/vỡ)
+        await page.wait_for_timeout(2000)
         download_success = False
         download_method = "Unknown"
         

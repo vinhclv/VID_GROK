@@ -1,7 +1,7 @@
 {
     "system": {
         "max_threads": 1,
-        "loop_limit": 1,
+        "loop_limit": 4,
         "max_retries": 3,
         "max_stt_retries": 1,
         "wait_time": 41,

@@ -110,4 +110,4 @@ def run_playwright_batch_sync(profile_path, file_batch, assets_path, prefix_prom
         )
     except Exception as e:
         log_callback(f"🔥 CẦU NỐI PLAYWRIGHT CRASH: {e}", "ERROR")
-        return False, list(file_batch)
+        return False, list(file_batch)      

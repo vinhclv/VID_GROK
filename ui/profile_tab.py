@@ -415,12 +415,6 @@ class ProfileManagerTab(ttk.Frame):
         try:
             def copy_task():
                 shutil.copytree(source_dir, dest_path)
-                # Xóa file Local State của ixBrowser cũ ngay khi import để tránh crash
-                local_state_path = os.path.join(dest_path, "Local State")
-                if os.path.exists(local_state_path):
-                    try: os.remove(local_state_path)
-                    except: pass
-                # Đồng bộ hóa
                 ProfileStateManager().sync_with_disk()
                 self.after(0, self.refresh_list)
             

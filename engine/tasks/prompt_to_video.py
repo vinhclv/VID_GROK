@@ -123,8 +123,8 @@ async def setup_video_format_ui(page: Page):
     """
     # 0. Chuyển sang tab Video
     try:
-        # Tìm chính xác nút có text là 'Video'
-        btn_video = page.locator("button:text-is('Video'), button:has-text('Video')").first
+        # Tìm chính xác nút radio Video ở toolbar dưới (không match sidebar)
+        btn_video = page.locator("button[role='radio']:has(span:text-is('Video'))").first
         if await btn_video.is_visible(timeout=2000):
             await human_click(btn_video, page)
             print(f'✅ Đã click chuyển sang tab Video')
@@ -138,8 +138,8 @@ async def setup_video_format_ui(page: Page):
 
     # 1. Chọn Aspect Ratio (Dạng Dropdown có mũi tên)
     try:
-        # Tìm nút dropdown hiện tại (chứa 16:9 hoặc 9:16 hoặc 1:1)
-        dropdown_btn = page.locator("button:has-text('16:9'), button:has-text('9:16'), button:has-text('1:1')").first
+        # Tìm nút dropdown tỉ lệ (match pattern số:số, tránh match sidebar items)
+        dropdown_btn = page.locator("button", has_text=re.compile(r"^\d+:\d+$")).first
         if await dropdown_btn.is_visible(timeout=2000):
             current_text = await dropdown_btn.inner_text()
             if aspect_ratio not in current_text:
@@ -200,15 +200,15 @@ async def process_1_image_video_batch(page: Page, file_batch: list, output_folde
         page.on("response", on_response)
     
     try:
-        # Tìm chính xác nút Saved bằng aria-label hoặc text (không sợ nhầm sang nút + Upload ảnh)
-        btn_saved = page.locator("button[aria-label='Saved'], button[aria-label='Đã lưu'], button:has-text('Saved'), button:has-text('Đã lưu')").first
-        if await btn_saved.is_visible(timeout=3000):
-            await human_click(btn_saved, page)
-            log_callback(f'➡️ Đã click nút Đã lưu (Saved) để dọn context trước khi chạy')
+        # Click nút History để dọn context / parent ID tránh bị dính
+        btn_history = page.locator("button[data-tour-id='imagine-tour-history'], button:has-text('History'), button:has-text('Lịch sử')").first
+        if await btn_history.is_visible(timeout=3000):
+            await human_click(btn_history, page)
+            log_callback(f'➡️ Đã click nút History để dọn context trước khi chạy')
         else:
-            log_callback(f'⚠️ Không tìm thấy nút Saved trên UI lúc bắt đầu.')
+            log_callback(f'⚠️ Không tìm thấy nút History trên UI lúc bắt đầu.')
     except Exception as e:
-        log_callback(f'⚠️ Lỗi chuyển context lúc bắt đầu: {e}')
+        log_callback(f'⚠️ Lỗi chuyển context History lúc bắt đầu: {e}')
         await page.wait_for_timeout(random.uniform(2000, 3000))
 
     for idx, item in enumerate(file_batch):
@@ -241,17 +241,17 @@ async def process_1_image_video_batch(page: Page, file_batch: list, output_folde
             if idx > 0:
                 try:
                     await page.wait_for_timeout(random.uniform(2000, 3000))
-                    # Tìm chính xác nút Saved bằng aria-label hoặc text (không sợ nhầm sang nút + Upload ảnh)
-                    btn_saved = page.locator("button[aria-label='Saved'], button[aria-label='Đã lưu'], button:has-text('Saved'), button:has-text('Đã lưu')").first
-                    if await btn_saved.is_visible(timeout=3000):
-                        await human_click(btn_saved, page)
-                        log_callback(f'➡️ Đã click nút Đã lưu (Saved) để chuyển context (STT {stt})')
+                    # Tìm chính xác nút History bằng data-tour-id hoặc text (không sợ nhầm sang nút + Upload ảnh)
+                    btn_history = page.locator("button[data-tour-id='imagine-tour-history'], button:has-text('History'), button:has-text('Lịch sử')").first
+                    if await btn_history.is_visible(timeout=3000):
+                        await human_click(btn_history, page)
+                        log_callback(f'➡️ Đã click nút History để chuyển context (STT {stt})')
                     else:
                         # Tuyệt đối KHÔNG dùng page.goto ở đây vì sẽ làm đứt Network của video trước đó.
                         # Nếu không tìm thấy nút, đành chấp nhận dính ParentID còn hơn mất video.
-                        log_callback(f'⚠️ Không tìm thấy nút Saved trên UI. Chấp nhận dính Parent Context (STT {stt})')
+                        log_callback(f'⚠️ Không tìm thấy nút History trên UI. Chấp nhận dính Parent Context (STT {stt})')
                 except Exception as e:
-                    log_callback(f'⚠️ Lỗi chuyển context /saved: {e}')
+                    log_callback(f'⚠️ Lỗi chuyển context History: {e}')
                 await page.wait_for_timeout(random.uniform(2000, 3000))
 
             # Lấy Textbox cực kỳ robust: Tìm textarea hoặc contenteditable nằm trong form
