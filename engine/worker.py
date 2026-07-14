@@ -94,12 +94,8 @@ async def playwright_lifecycle_manager(profile_path, file_batch, assets_path, pr
         
     finally:
         # Bước 3: Dọn dẹp trình duyệt sạch sẽ
-        try: 
-            await context.close()
-            if hasattr(context, 'playwright_instance'):
-                await context.playwright_instance.stop()
-        except: 
-            pass
+        from engine.browser_ix import close_context_playwright
+        await close_context_playwright(context, log_callback)
 
 
 def run_playwright_batch_sync(profile_path, file_batch, assets_path, prefix_prompt, url, log_callback, task_type):

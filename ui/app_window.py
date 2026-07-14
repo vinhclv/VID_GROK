@@ -30,6 +30,13 @@ class BatchApp:
         # Reset trạng thái các profile về idle lúc khởi động
         ProfileStateManager().reset_all()
         
+        # Khởi chạy phân quyền Sandbox ngầm tránh treo giao diện
+        try:
+            from engine.browser_ix import fix_sandbox_permissions_async
+            fix_sandbox_permissions_async(log_callback=self.log)
+        except Exception as e:
+            print(f"Lỗi khởi chạy phân quyền Sandbox ngầm: {e}")
+        
         try: sv_ttk.set_theme("dark")
         except: pass
 

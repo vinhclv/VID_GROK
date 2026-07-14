@@ -32,15 +32,42 @@ class ProfileStateManager:
         self._initialized = True
 
     def sync_with_disk(self):
-        """Đồng bộ hóa danh sách profile với thư mục trên ổ cứng"""
+        """Đồng bộ hóa danh sách profile với thư mục trên ổ cứng hoặc ixBrowser API"""
         with self.lock:
             if not os.path.exists(self.profiles_dir):
                 os.makedirs(self.profiles_dir)
 
-            folders = [
-                f for f in os.listdir(self.profiles_dir)
-                if os.path.isdir(os.path.join(self.profiles_dir, f))
-            ]
+            browser_type = config.global_settings["system"].get("browser_type", "ixBrowser")
+            folders = []
+            error_msg = None
+
+            profile_groups = {}
+            if browser_type == "ixBrowser (Local API)":
+                from utils.ixbrowser_service import IxBrowserService
+                success, err, profiles_data = IxBrowserService.get_profiles()
+                if success:
+                    for p in profiles_data:
+                        p_id = p.get("profile_id")
+                        p_name = p.get("name", "Unnamed")
+                        folder_name = f"{p_id} - {p_name}"
+                        folders.append(folder_name)
+                        profile_groups[folder_name] = {
+                            "group_id": p.get("group_id"),
+                            "group_name": p.get("group_name", "").strip()
+                        }
+                else:
+                    error_msg = err
+            else:
+                try:
+                    folders = [
+                        f for f in os.listdir(self.profiles_dir)
+                        if os.path.isdir(os.path.join(self.profiles_dir, f))
+                    ]
+                except Exception as e:
+                    error_msg = str(e)
+
+            if error_msg and browser_type == "ixBrowser (Local API)":
+                return False, error_msg
 
             # Đọc file states cũ nếu có
             disk_states = {}
@@ -57,6 +84,10 @@ class ProfileStateManager:
                 status = old_state.get("status", "idle")
                 rate_limit_until = old_state.get("rate_limit_until", 0.0)
 
+                g_info = profile_groups.get(folder, {})
+                group_id = g_info.get("group_id", old_state.get("group_id"))
+                group_name = g_info.get("group_name", old_state.get("group_name", ""))
+
                 new_states[folder] = {
                     "status": status,
                     "error_count": old_state.get("error_count", 0),
@@ -64,11 +95,14 @@ class ProfileStateManager:
                     "selected": old_state.get("selected", True),
                     "proxy": old_state.get("proxy", ""),
                     "rate_limit_until": rate_limit_until,
-                    "last_error": old_state.get("last_error", None)
+                    "last_error": old_state.get("last_error", None),
+                    "group_id": group_id,
+                    "group_name": group_name
                 }
 
             self.states = new_states
             self._save_to_disk()
+            return True, None
 
     def _migrate_old_proxies(self):
         old_proxy_file = os.path.join(self.profiles_dir, "proxy_map.json")

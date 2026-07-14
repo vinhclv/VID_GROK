@@ -26,6 +26,9 @@ class ProfileManagerTab(ttk.Frame):
         self.profile_vars = {} 
         self.card_widgets = {}  # Lưu trữ các widget của mỗi card để cập nhật trạng thái
 
+        self.current_page = 1
+        self.page_size = 20
+
         self.setup_ui()
         self.refresh_list()
         
@@ -96,8 +99,15 @@ class ProfileManagerTab(ttk.Frame):
                 except: pass
                 try: widgets["btn_setup"].config(state="disabled")
                 except: pass
-                try: widgets["btn_del"].config(state="disabled")
-                except: pass
+                
+                browser_type = config.global_settings["system"].get("browser_type", "ixBrowser")
+                if browser_type == "ixBrowser (Local API)":
+                    try: widgets["btn_del"].config(state="normal") # Nút ❌ (đóng) luôn khả dụng
+                    except: pass
+                else:
+                    try: widgets["btn_del"].config(state="disabled")
+                    except: pass
+
                 if widgets.get("entry_proxy"):
                     try: widgets["entry_proxy"].config(state="disabled")
                     except: pass
@@ -115,8 +125,13 @@ class ProfileManagerTab(ttk.Frame):
                 except: pass
                 try: widgets["btn_setup"].config(state="normal")
                 except: pass
-                try: widgets["btn_del"].config(state="normal")
-                except: pass
+                browser_type = config.global_settings["system"].get("browser_type", "ixBrowser")
+                if browser_type == "ixBrowser (Local API)":
+                    try: widgets["btn_del"].config(state="normal") # Nút ❌ (đóng) luôn khả dụng
+                    except: pass
+                else:
+                    try: widgets["btn_del"].config(state="normal")
+                    except: pass
                 try: widgets["btn_kill"].config(state="disabled", text="☠️")
                 except: pass
                 if widgets.get("entry_proxy"):
@@ -179,15 +194,43 @@ class ProfileManagerTab(ttk.Frame):
         self.entry_name = ttk.Entry(frame_top, width=30)
         self.entry_name.pack(side="left", padx=(0, 5))
         
-        ttk.Button(frame_top, text="➕ Create New", style="Accent.TButton", command=self.add_profile).pack(side="left")
-        ttk.Button(frame_top, text="📂 Import", command=self.import_profile).pack(side="right")
+        self.btn_create = ttk.Button(frame_top, text="➕ Create New", style="Accent.TButton", command=self.add_profile)
+        self.btn_create.pack(side="left")
+        self.btn_import = ttk.Button(frame_top, text="📂 Import", command=self.import_profile)
+        self.btn_import.pack(side="right")
         
         # Select All / Refresh Buttons
         ttk.Button(frame_top, text="☑️ Select All", command=self.select_all).pack(side="right", padx=5)
         ttk.Button(frame_top, text="🔄 Refresh", command=self.manual_refresh).pack(side="right", padx=5)
-        ttk.Button(frame_top, text="📥 Proxy List", command=self.import_proxy_list).pack(side="right", padx=5)
+        self.btn_proxy_list = ttk.Button(frame_top, text="📥 Proxy List", command=self.import_proxy_list)
+        self.btn_proxy_list.pack(side="right", padx=5)
 
         ttk.Separator(self, orient="horizontal").pack(fill="x")
+
+        # === 1.2 FILTER BAR (GROUP FILTER) ===
+        self.frame_filter = ttk.Frame(self, padding=(10, 5))
+        self.frame_filter.pack(fill="x")
+
+        self.lbl_group_filter = ttk.Label(self.frame_filter, text="📁 Lọc nhóm Profile:", font=("Segoe UI", 10, "bold"))
+        self.lbl_group_filter.pack(side="left", padx=(0, 5))
+
+        self.var_group_filter = tk.StringVar(value="Tất cả")
+        self.cb_group_filter = ttk.Combobox(self.frame_filter, textvariable=self.var_group_filter, values=["Tất cả"], state="readonly", width=30)
+        self.cb_group_filter.pack(side="left", padx=5)
+        self.cb_group_filter.bind("<<ComboboxSelected>>", self.on_group_filter_changed)
+
+        # === 1.5 PAGINATION BAR (BOTTOM BAR) ===
+        self.frame_pagination = ttk.Frame(self, padding=5)
+        self.frame_pagination.pack(fill="x", side="bottom")
+
+        self.btn_prev = ttk.Button(self.frame_pagination, text="⬅️ Trang trước", command=self.prev_page, width=15)
+        self.btn_prev.pack(side="left", padx=10)
+
+        self.lbl_page_info = ttk.Label(self.frame_pagination, text="Trang 1 / 1", font=("Segoe UI", 10, "bold"), anchor="center")
+        self.lbl_page_info.pack(side="left", fill="x", expand=True)
+
+        self.btn_next = ttk.Button(self.frame_pagination, text="Trang sau ➡️", command=self.next_page, width=15)
+        self.btn_next.pack(side="right", padx=10)
 
         # === 2. LIST AREA (SCROLLABLE AREA) ===
         self.canvas = tk.Canvas(self, highlightthickness=0)
@@ -211,12 +254,21 @@ class ProfileManagerTab(ttk.Frame):
     def _on_mousewheel(self, event):
         self.canvas.yview_scroll(int(-1*(event.delta/120)), "units")
 
+    def on_group_filter_changed(self, event=None):
+        # Tự động bỏ chọn tất cả profile khi đổi nhóm lọc
+        states = ProfileStateManager().get_all_states()
+        for name in states.keys():
+            ProfileStateManager().set_selected(name, False)
+            
+        self.current_page = 1
+        self.refresh_list()
+
     def manual_refresh(self):
         """Khôi phục tất cả trạng thái về idle, reset đếm lỗi và tải lại danh sách"""
         ProfileStateManager().reset_all()
-        self.refresh_list()
+        self.refresh_list(force_sync=True)
 
-    def refresh_list(self):
+    def refresh_list(self, force_sync=False):
         """Redraw the entire profile list"""
         # Clear old widgets
         for widget in self.scrollable_frame.winfo_children():
@@ -226,21 +278,102 @@ class ProfileManagerTab(ttk.Frame):
         self.profile_vars.clear()
         self.card_widgets.clear()
 
-        # Đồng bộ hóa danh sách từ thư mục ổ cứng
-        ProfileStateManager().sync_with_disk()
+        browser_type = config.global_settings["system"].get("browser_type", "ixBrowser")
+        if browser_type == "ixBrowser (Local API)":
+            self.btn_create.config(state="disabled")
+            self.btn_import.config(state="disabled")
+            self.btn_proxy_list.config(state="disabled")
+            try: self.frame_filter.pack(fill="x", after=self.btn_create.master)
+            except: pass
+        else:
+            self.btn_create.config(state="normal")
+            self.btn_import.config(state="normal")
+            self.btn_proxy_list.config(state="normal")
+            try: self.frame_filter.pack_forget()
+            except: pass
 
-        if os.path.exists(self.profiles_dir):
-            folders = sorted([f for f in os.listdir(self.profiles_dir) if os.path.isdir(os.path.join(self.profiles_dir, f))])
-            
-            if not folders:
-                ttk.Label(self.scrollable_frame, text="No profiles found. Create new or Import!", foreground="#888").pack(pady=20)
+        # Đồng bộ hóa danh sách từ thư mục ổ cứng hoặc API chỉ khi force_sync hoặc states trống
+        states = ProfileStateManager().get_all_states()
+        if force_sync or not states:
+            success, error_msg = ProfileStateManager().sync_with_disk()
+            if not success and error_msg:
+                lbl = ttk.Label(self.scrollable_frame, text=error_msg, foreground="#ff5555", wraplength=500, justify="center")
+                lbl.pack(pady=30, padx=20)
+                try: self.frame_pagination.pack_forget()
+                except: pass
                 return
+            states = ProfileStateManager().get_all_states()
 
-            for folder_name in folders:
-                self.create_profile_card(folder_name)
+        # Cập nhật danh sách nhóm vào Combobox nếu chạy chế độ API
+        if browser_type == "ixBrowser (Local API)":
+            groups = sorted(list(set(state.get("group_name", "").strip() for state in states.values() if state.get("group_name"))))
+            cb_values = ["Tất cả"] + groups
+            self.cb_group_filter.config(values=cb_values)
+            
+            # Đảm bảo lựa chọn hiện tại vẫn hợp lệ
+            current_selected = self.var_group_filter.get()
+            if current_selected not in cb_values:
+                self.var_group_filter.set("Tất cả")
+
+        folders = sorted(list(states.keys()))
+        
+        # Áp dụng bộ lọc nhóm
+        if browser_type == "ixBrowser (Local API)":
+            selected_group = self.var_group_filter.get()
+            if selected_group != "Tất cả":
+                folders = [f for f in folders if states[f].get("group_name") == selected_group]
+
+        if not folders:
+            if browser_type == "ixBrowser (Local API)":
+                selected_group = self.var_group_filter.get()
+                if selected_group != "Tất cả":
+                    msg = f"Không tìm thấy profile nào trong nhóm '{selected_group}'."
+                else:
+                    msg = "Không tìm thấy profile nào trên ixBrowser. Vui lòng tạo profile trên ứng dụng ixBrowser trước."
+            else:
+                msg = "No profiles found. Create new or Import!"
+            ttk.Label(self.scrollable_frame, text=msg, foreground="#888", wraplength=500, justify="center").pack(pady=20)
+            try: self.frame_pagination.pack_forget()
+            except: pass
+            return
+
+        # Tính toán phân trang
+        import math
+        total_profiles = len(folders)
+        total_pages = max(1, math.ceil(total_profiles / self.page_size))
+        
+        if self.current_page > total_pages:
+            self.current_page = total_pages
+        if self.current_page < 1:
+            self.current_page = 1
+
+        start_idx = (self.current_page - 1) * self.page_size
+        end_idx = start_idx + self.page_size
+        page_folders = folders[start_idx:end_idx]
+
+        for folder_name in page_folders:
+            self.create_profile_card(folder_name)
+
+        # Hiển thị và cập nhật Pagination Bar
+        try:
+            self.frame_pagination.pack(fill="x", side="bottom")
+            self.lbl_page_info.config(text=f"Trang {self.current_page} / {total_pages} (Tổng: {total_profiles} profiles)")
+            
+            if self.current_page == 1:
+                self.btn_prev.config(state="disabled")
+            else:
+                self.btn_prev.config(state="normal")
+                
+            if self.current_page == total_pages:
+                self.btn_next.config(state="disabled")
+            else:
+                self.btn_next.config(state="normal")
+        except Exception as e:
+            print(f"Lỗi vẽ pagination bar: {e}")
 
     def create_profile_card(self, profile_name):
         """Create UI card for a single profile"""
+        browser_type = config.global_settings["system"].get("browser_type", "ixBrowser")
         card = ttk.LabelFrame(self.scrollable_frame, padding=(5, 5))
         card.pack(fill="x", expand=True, padx=10, pady=2, anchor="n")
 
@@ -269,6 +402,8 @@ class ProfileManagerTab(ttk.Frame):
 
         # --- RIGHT SIDE: pack buttons first so they claim right space ---
         btn_del = ttk.Button(card, text="🗑️", width=3, command=lambda p=profile_name: self.delete_profile(p))
+        if browser_type == "ixBrowser (Local API)":
+            btn_del.config(text="❌", command=lambda p=profile_name: self.close_api_profile(p))
         btn_del.pack(side="right", padx=2)
 
         # Kill button
@@ -277,7 +412,7 @@ class ProfileManagerTab(ttk.Frame):
                 self.kill_callback(p)
             else:
                 print(f"Kill: Khong co batch dang chay")
-            # Cập nhật trạng thái sang bị ép dừng (killed)
+            # Cập trạng thái sang bị ép dừng (killed)
             ProfileStateManager().set_state(p, "killed", "Bị người dùng ép dừng bằng nút Kill")
             try:
                 lbl.config(foreground="#ff5555")
@@ -295,14 +430,14 @@ class ProfileManagerTab(ttk.Frame):
         )
         btn_setup.pack(side="right", padx=2)
 
-        # Display Size (thread)
-        path = os.path.join(self.profiles_dir, profile_name)
-        threading.Thread(target=self._update_size_label, args=(path, card), daemon=True).start()
+        # Display Size (thread) - Chỉ chạy khi không phải API mode
+        if browser_type != "ixBrowser (Local API)":
+            path = os.path.join(self.profiles_dir, profile_name)
+            threading.Thread(target=self._update_size_label, args=(path, card), daemon=True).start()
 
         # --- PROXY ENTRY (middle, fills remaining space) ---
-        browser_type = config.global_settings["system"].get("browser_type", "ixBrowser")
         entry_proxy = None
-        if browser_type == "ixBrowser":
+        if browser_type in ["ixBrowser", "GoLogin"]:
             current_proxy = ProfileStateManager().get_proxy(profile_name)
 
             entry_proxy = ttk.Entry(card, width=28)
@@ -362,16 +497,46 @@ class ProfileManagerTab(ttk.Frame):
 
 
     def get_selected_profiles(self):
-        """Return list of selected profile names"""
-        return [name for name, var in self.profile_vars.items() if var.get()]
+        """Return list of selected profile names across all pages"""
+        states = ProfileStateManager().get_all_states()
+        return [name for name, state in states.items() if state.get("selected", True)]
 
     def select_all(self):
-        """Select all or Deselect all"""
-        any_unchecked = any(not var.get() for var in self.profile_vars.values())
+        """Select all or Deselect all profiles under the active group filter"""
+        states = ProfileStateManager().get_all_states()
+        browser_type = config.global_settings["system"].get("browser_type", "ixBrowser")
+        
+        # Lấy danh sách profile thuộc bộ lọc nhóm hiện tại
+        active_profiles = list(states.keys())
+        if browser_type == "ixBrowser (Local API)":
+            selected_group = self.var_group_filter.get()
+            if selected_group != "Tất cả":
+                active_profiles = [name for name in active_profiles if states[name].get("group_name") == selected_group]
+                
+        any_unchecked = any(not states[name].get("selected", True) for name in active_profiles)
         new_val = True if any_unchecked else False
-        for name, var in self.profile_vars.items():
-            var.set(new_val)
+        
+        # Chỉ cập nhật trạng thái chọn cho các profile thuộc nhóm đang lọc
+        for name in active_profiles:
             ProfileStateManager().set_selected(name, new_val)
+            
+        # Cập nhật checkbox hiển thị trên UI
+        for name, var in self.profile_vars.items():
+            if name in active_profiles:
+                var.set(new_val)
+
+    def prev_page(self):
+        if self.current_page > 1:
+            self.current_page -= 1
+            self.refresh_list()
+
+    def next_page(self):
+        states = ProfileStateManager().get_all_states()
+        import math
+        total_pages = max(1, math.ceil(len(states) / self.page_size))
+        if self.current_page < total_pages:
+            self.current_page += 1
+            self.refresh_list()
 
     def add_profile(self):
         name = self.entry_name.get().strip()
@@ -392,8 +557,7 @@ class ProfileManagerTab(ttk.Frame):
         os.makedirs(new_path)
         self.entry_name.delete(0, tk.END)
         # Đồng bộ hóa với ổ cứng và vẽ lại danh sách
-        ProfileStateManager().sync_with_disk()
-        self.refresh_list()
+        self.refresh_list(force_sync=True)
 
     def import_profile(self):
         source_dir = filedialog.askdirectory(title="Select old Profile folder")
@@ -412,15 +576,37 @@ class ProfileManagerTab(ttk.Frame):
                 messagebox.showerror("Lỗi", f"Không xóa được bản cũ: {e}")
                 return
 
+        # Check if source_dir contains Preferences directly (it's a profile folder Default)
+        is_profile_folder = os.path.exists(os.path.join(source_dir, "Preferences"))
+
         try:
             def copy_task():
-                shutil.copytree(source_dir, dest_path)
-                ProfileStateManager().sync_with_disk()
-                self.after(0, self.refresh_list)
+                if is_profile_folder:
+                    target_default = os.path.join(dest_path, "Default")
+                    shutil.copytree(source_dir, target_default)
+                else:
+                    shutil.copytree(source_dir, dest_path)
+                self.after(0, lambda: self.refresh_list(force_sync=True))
             
             threading.Thread(target=copy_task, daemon=True).start()
         except Exception as e:
             messagebox.showerror("Import Error", str(e))
+
+    def close_api_profile(self, profile_name):
+        parts = profile_name.split(" - ")
+        if not parts[0].isdigit():
+            return
+        profile_id = int(parts[0])
+        
+        # Gửi API đóng profile
+        from utils.ixbrowser_service import IxBrowserService
+        IxBrowserService.close_profile(profile_id)
+        
+        # Giải phóng trạng thái trên Tool về idle
+        ProfileStateManager().release(profile_name)
+        ProfileStateManager().set_state(profile_name, "idle")
+        
+        self.refresh_list()
 
     def delete_profile(self, profile_name):
         state = ProfileStateManager().get_state(profile_name)
@@ -433,8 +619,7 @@ class ProfileManagerTab(ttk.Frame):
             try:
                 shutil.rmtree(os.path.join(self.profiles_dir, profile_name))
                 # Đồng bộ hóa
-                ProfileStateManager().sync_with_disk()
-                self.refresh_list()
+                self.refresh_list(force_sync=True)
             except Exception as e:
                 messagebox.showerror("Error", f"Cannot delete: {e}")
 
@@ -448,12 +633,14 @@ class ProfileManagerTab(ttk.Frame):
 
         async def _run_async():
             print(f"Opening Setup for {profile_name}...")
-            context = await init_driver_from_profile_playwright(profile_path, log_callback=print)
-            if not context:
-                print("Failed to open browser")
-                ProfileStateManager().set_state(profile_name, "error", "Không thể khởi động trình duyệt")
-                return
+            context = None
             try:
+                context = await init_driver_from_profile_playwright(profile_path, log_callback=print)
+                if not context:
+                    print("Failed to open browser")
+                    ProfileStateManager().set_state(profile_name, "error", "Không thể khởi động trình duyệt")
+                    return
+                
                 # Mở thẳng trang Gemini để setup trên tab đầu tiên (được tự động gắn nhãn tiêu đề profile)
                 if context.pages:
                     page = context.pages[0]
@@ -471,14 +658,17 @@ class ProfileManagerTab(ttk.Frame):
                         break
                 print(f"Setup {profile_name} closed.")
             except Exception as e:
-                print(f"Browser Error: {e}")
-                ProfileStateManager().set_state(profile_name, "error", f"Trình duyệt gặp lỗi: {e}")
+                err_str = str(e).lower()
+                if "closed" in err_str or "target page" in err_str or "connection closed" in err_str:
+                    print(f"Setup {profile_name} closed by user.")
+                else:
+                    print(f"Browser Error: {e}")
+                    ProfileStateManager().set_state(profile_name, "error", f"Trình duyệt gặp lỗi: {e}")
             finally:
-                try:
-                    await context.close()
-                    await context.playwright_instance.stop()
-                except: pass
-                # Giải phóng profile về idle
+                if context:
+                    from engine.browser_ix import close_context_playwright
+                    await close_context_playwright(context, print)
+                # Đảm bảo luôn giải phóng profile về idle
                 ProfileStateManager().release(profile_name)
 
         def run_browser():

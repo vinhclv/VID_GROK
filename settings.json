@@ -7,7 +7,8 @@
         "wait_time": 41,
         "aspect_ratio": "9:16",
         "resolution": "480p",
-        "browser_type": "ixBrowser",
+        "browser_type": "ixBrowser (Local API)",
+        "ixbrowser_api_url": "http://127.0.0.1:53200",
         "rate_limit_cooldown_minutes": 1,
         "max_rate_limit_retries": 2
     },

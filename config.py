@@ -23,6 +23,7 @@ DEFAULT_CONFIG_DATA = {
         "aspect_ratio": "16:9",
         "resolution": "720p",
         "browser_type": "ixBrowser",
+        "ixbrowser_api_url": "http://127.0.0.1:53200",
         "rate_limit_cooldown_minutes": 120,
         "max_rate_limit_retries": 3
     },

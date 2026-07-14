@@ -80,27 +80,43 @@ class SettingsTab(ttk.Frame):
         cb_res = ttk.Combobox(scrollable_content, textvariable=self.var_resolution, values=["720p", "1080p", "480p"], state="readonly", width=13)
         cb_res.grid(row=13, column=0, sticky="ew")
 
-        # 8. Browser Type (ixBrowser / GoLogin)
+        # 8. Browser Type (ixBrowser / GoLogin / ixBrowser (Local API))
         tk.Label(scrollable_content, text="Loại Trình Duyệt:", anchor="w").grid(row=14, column=0, sticky="w", pady=(15, 5))
         self.var_browser_type = tk.StringVar(value=self.settings["system"].get("browser_type", "ixBrowser"))
-        cb_browser = ttk.Combobox(scrollable_content, textvariable=self.var_browser_type, values=["ixBrowser", "GoLogin"], state="readonly", width=13)
+        cb_browser = ttk.Combobox(scrollable_content, textvariable=self.var_browser_type, values=["ixBrowser", "GoLogin", "ixBrowser (Local API)"], state="readonly", width=13)
         cb_browser.grid(row=15, column=0, sticky="ew")
 
+        # 8b. ixBrowser API URL
+        self.lbl_api_url = tk.Label(scrollable_content, text="ixBrowser API URL:", anchor="w")
+        self.var_api_url = tk.StringVar(value=self.settings["system"].get("ixbrowser_api_url", "http://127.0.0.1:53200"))
+        self.entry_api_url = ttk.Entry(scrollable_content, textvariable=self.var_api_url)
+
+        def _on_browser_change(event=None):
+            if self.var_browser_type.get() == "ixBrowser (Local API)":
+                self.lbl_api_url.grid(row=16, column=0, sticky="w", pady=(10, 5))
+                self.entry_api_url.grid(row=17, column=0, sticky="ew")
+            else:
+                self.lbl_api_url.grid_remove()
+                self.entry_api_url.grid_remove()
+
+        cb_browser.bind("<<ComboboxSelected>>", _on_browser_change)
+        _on_browser_change()
+
         # 9. Rate Limit Cooldown (m)
-        tk.Label(scrollable_content, text="Rate Limit Cooldown (m):", anchor="w").grid(row=16, column=0, sticky="w", pady=(15, 5))
+        tk.Label(scrollable_content, text="Rate Limit Cooldown (m):", anchor="w").grid(row=18, column=0, sticky="w", pady=(15, 5))
         self.var_cooldown = tk.IntVar(value=self.settings["system"].get("rate_limit_cooldown_minutes", 120))
-        ttk.Spinbox(scrollable_content, from_=1, to=1440, textvariable=self.var_cooldown, width=15).grid(row=17, column=0, sticky="ew")
+        ttk.Spinbox(scrollable_content, from_=1, to=1440, textvariable=self.var_cooldown, width=15).grid(row=19, column=0, sticky="ew")
 
         # 10. Max Rate Limit Retries
-        tk.Label(scrollable_content, text="Max Rate Limit Retries:", anchor="w").grid(row=18, column=0, sticky="w", pady=(15, 5))
+        tk.Label(scrollable_content, text="Max Rate Limit Retries:", anchor="w").grid(row=20, column=0, sticky="w", pady=(15, 5))
         self.var_max_rate_limit_retries = tk.IntVar(value=self.settings["system"].get("max_rate_limit_retries", 3))
-        ttk.Spinbox(scrollable_content, from_=1, to=100, textvariable=self.var_max_rate_limit_retries, width=15).grid(row=19, column=0, sticky="ew")
+        ttk.Spinbox(scrollable_content, from_=1, to=100, textvariable=self.var_max_rate_limit_retries, width=15).grid(row=21, column=0, sticky="ew")
 
         # Nút Save nằm dưới cùng, giãn cách xa một chút
-        ttk.Separator(scrollable_content, orient='horizontal').grid(row=20, column=0, sticky="ew", pady=20)
+        ttk.Separator(scrollable_content, orient='horizontal').grid(row=22, column=0, sticky="ew", pady=20)
         
-        ttk.Button(scrollable_content, text="💾 LƯU CẤU HÌNH", style="Accent.TButton", command=self.save_settings).grid(row=21, column=0, sticky="ew", pady=5)
-        ttk.Button(scrollable_content, text="🔄 Mặc định", command=self.reset_defaults).grid(row=22, column=0, sticky="ew")
+        ttk.Button(scrollable_content, text="💾 LƯU CẤU HÌNH", style="Accent.TButton", command=self.save_settings).grid(row=23, column=0, sticky="ew", pady=5)
+        ttk.Button(scrollable_content, text="🔄 Mặc định", command=self.reset_defaults).grid(row=24, column=0, sticky="ew")
 
         scrollable_content.columnconfigure(0, weight=1) # Để các input giãn full bề ngang cột trái
 
@@ -318,6 +334,7 @@ class SettingsTab(ttk.Frame):
         config.global_settings["system"]["aspect_ratio"] = self.var_aspect_ratio.get()
         config.global_settings["system"]["resolution"] = self.var_resolution.get()
         config.global_settings["system"]["browser_type"] = self.var_browser_type.get()
+        config.global_settings["system"]["ixbrowser_api_url"] = self.var_api_url.get().strip()
         config.global_settings["system"]["rate_limit_cooldown_minutes"] = self.var_cooldown.get()
         config.global_settings["system"]["max_rate_limit_retries"] = self.var_max_rate_limit_retries.get()
 
@@ -343,6 +360,7 @@ class SettingsTab(ttk.Frame):
             self.var_aspect_ratio.set(config.global_settings["system"].get("aspect_ratio", "16:9"))
             self.var_resolution.set(config.global_settings["system"].get("resolution", "720p"))
             self.var_browser_type.set(config.global_settings["system"].get("browser_type", "ixBrowser"))
+            self.var_api_url.set(config.global_settings["system"].get("ixbrowser_api_url", "http://127.0.0.1:53200"))
             self.var_cooldown.set(config.global_settings["system"].get("rate_limit_cooldown_minutes", 120))
             self.var_max_rate_limit_retries.set(config.global_settings["system"].get("max_rate_limit_retries", 3))
             self._load_gems_to_tree()

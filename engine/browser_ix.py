@@ -1,8 +1,12 @@
 import os
 import shutil
 import json
+import asyncio
+import threading
 from playwright.async_api import async_playwright
 import config
+
+_ix_api_open_lock = threading.Lock()
 
 # ==========================================
 # CẤU HÌNH ĐƯỜNG DẪN IXBROWSER & GOLOGIN CORE
@@ -100,10 +104,106 @@ def _load_proxy_from_map(profile_folder_path):
 
 async def init_driver_from_profile_playwright(profile_folder_path, log_callback=print):
     """
-    Hàm Playwright ASYNC khởi tạo Trình duyệt — hỗ trợ song song ixBrowser và GoLogin.
-    Chỉ gắn proxy cho ixBrowser theo đúng quy ước thực tế.
+    Hàm Playwright ASYNC khởi tạo Trình duyệt — hỗ trợ song song ixBrowser (Cục bộ), GoLogin (Cục bộ) và ixBrowser (Local API).
     """
     global _permissions_fixed
+    browser_type = config.global_settings["system"].get("browser_type", "ixBrowser")
+    folder_name = os.path.basename(profile_folder_path)
+
+    # =========================================================================
+    # CHẾ ĐỘ 1: IXBROWSER LOCAL API (Kết nối qua Local API & CDP)
+    # =========================================================================
+    if browser_type == "ixBrowser (Local API)":
+        parts = folder_name.split(" - ")
+        if not parts[0].isdigit():
+            log_callback(f"❌ Tên profile không hợp lệ cho ixBrowser API: {folder_name}")
+            return None
+        profile_id = int(parts[0])
+
+        from utils.ixbrowser_service import IxBrowserService
+        
+        # Đồng bộ hóa toàn bộ tiến trình mở và kết nối để tránh nghẽn CPU/CDP port khi click mở liên tục
+        with _ix_api_open_lock:
+            log_callback(f"🌐 Đang gọi ixBrowser API để mở profile {profile_id}...")
+            success, err, ws_url = IxBrowserService.open_profile(profile_id)
+            if not success:
+                log_callback(f"❌ ixBrowser API báo lỗi: {err}")
+                return None
+                
+            try:
+                p = await async_playwright().start()
+                log_callback(f"🔌 Kết nối Playwright tới CDP: {ws_url}")
+                
+                browser = None
+                cdp_retries = 3
+                while cdp_retries > 0:
+                    try:
+                        browser = await p.chromium.connect_over_cdp(ws_url)
+                        break
+                    except Exception as cdp_err:
+                        cdp_retries -= 1
+                        if cdp_retries == 0:
+                            raise cdp_err
+                        log_callback(f"⚠️ Cổng CDP chưa sẵn sàng ({cdp_err}). Đang thử kết nối lại sau 1.5s...")
+                        await asyncio.sleep(1.5)
+                
+                if not browser.contexts:
+                    log_callback("❌ Trình duyệt không có context nào")
+                    await browser.close()
+                    await p.stop()
+                    return None
+                    
+                context = browser.contexts[0]
+                context.browser_instance = browser
+                context.playwright_instance = p
+                context.ix_profile_id = profile_id
+                
+                # Rút gọn tên hiển thị
+                display_name = parts[1] if len(parts) > 1 else str(profile_id)
+                if len(display_name) > 12:
+                    display_name = f"{display_name[:4]}...{display_name[-8:]}"
+                
+                init_js = f"""
+                (function() {{
+                    const profileName = "{display_name}";
+                    function updateTitle() {{
+                        if (document.title && !document.title.startsWith('[' + profileName + ']')) {{
+                            document.title = '[' + profileName + '] ' + document.title;
+                        }}
+                    }}
+                    setInterval(updateTitle, 1000);
+                    const observer = new MutationObserver(updateTitle);
+                    observer.observe(document.documentElement, {{ childList: true, subtree: true }});
+                    updateTitle();
+                }})();
+                """
+                await context.add_init_script(init_js)
+
+                # Tự động đẩy cửa sổ trình duyệt lên trước mặt (Restore & Bring to front)
+                try:
+                    page = context.pages[0] if context.pages else await context.new_page()
+                    await page.bring_to_front()
+                    # Khôi phục trạng thái cửa sổ về bình thường (unminimize) nếu đang ẩn dưới Taskbar
+                    client = await context.new_cdp_session(page)
+                    win_info = await client.send("Browser.getWindowForTarget")
+                    win_id = win_info.get("windowId")
+                    if win_id:
+                        await client.send("Browser.setWindowBounds", {
+                            "windowId": win_id,
+                            "bounds": {"windowState": "normal"}
+                        })
+                except:
+                    pass
+
+                return context
+                
+            except Exception as e:
+                log_callback(f"❌ Lỗi khởi chạy/kết nối qua ixBrowser API: {e}")
+                return None
+
+    # =========================================================================
+    # CHẾ ĐỘ 2: KHỞI CHẠY CỤC BỘ (Offline folders - ixBrowser hoặc GoLogin)
+    # =========================================================================
     if not _permissions_fixed and os.name == 'nt':
         try:
             import subprocess
@@ -125,9 +225,6 @@ async def init_driver_from_profile_playwright(profile_folder_path, log_callback=
     if not os.path.exists(profile_folder_path):
         os.makedirs(profile_folder_path, exist_ok=True)
         log_callback(f"⚠️ Folder chưa tồn tại, đã tạo mới: {profile_folder_path}")
-
-    folder_name = os.path.basename(profile_folder_path)
-    browser_type = config.global_settings["system"].get("browser_type", "ixBrowser")
 
     log_callback(f"🧹 Đang dọn dẹp Cache cũ cho profile {browser_type}: {folder_name}...")
     clean_preferences_bloat(profile_folder_path)
@@ -160,9 +257,9 @@ async def init_driver_from_profile_playwright(profile_folder_path, log_callback=
         "--ash-no-nudges",
     ]
 
-    # --- Chỉ nạp và gắn proxy cho chế độ ixBrowser ---
+    # --- Nạp và gắn proxy cho cả hai chế độ chạy cục bộ ---
     proxy_config = None
-    if browser_type == "ixBrowser":
+    if browser_type in ["ixBrowser", "GoLogin"]:
         proxy_str = _load_proxy_from_map(profile_folder_path)
         if not proxy_str:
             proxy_txt = os.path.join(profile_folder_path, "proxy.txt")
@@ -203,13 +300,12 @@ async def init_driver_from_profile_playwright(profile_folder_path, log_callback=
         context.my_download_dir = profile_folder_path
         context.playwright_instance = p
 
-        # Rút gọn tên profile nếu quá dài để hiển thị rõ phần đầu và phần đuôi (tail) trên thanh tiêu đề Chrome
+        # Rút gọn tên profile
         if len(folder_name) > 12:
             display_name = f"{folder_name[:4]}...{folder_name[-8:]}"
         else:
             display_name = folder_name
 
-        # Tự động chèn script đổi tiêu đề Tab chứa tên profile để người dùng phân biệt các cửa sổ trình duyệt khi chạy đa luồng
         init_js = f"""
         (function() {{
             const profileName = "{display_name}";
@@ -225,9 +321,70 @@ async def init_driver_from_profile_playwright(profile_folder_path, log_callback=
         }})();
         """
         await context.add_init_script(init_js)
-
         return context
 
     except Exception as e:
-        log_callback(f"❌ Lỗi khởi tạo ixBrowser Playwright ({folder_name}): {e}")
+        log_callback(f"❌ Lỗi khởi tạo trình duyệt ({folder_name}): {e}")
         return None
+
+
+async def close_context_playwright(context, log_callback=print):
+    """
+    Dọn dẹp trình duyệt sạch sẽ: đóng CDP connection, tắt playwright,
+    và gửi lệnh API đóng profile tới ixBrowser nếu sử dụng Local API.
+    """
+    if not context:
+        return
+    try:
+        ix_profile_id = getattr(context, "ix_profile_id", None)
+        log_callback("🧹 Đang dọn dẹp trình duyệt Playwright...")
+        
+        try: await context.close()
+        except: pass
+        
+        if hasattr(context, "browser_instance"):
+            try: await context.browser_instance.close()
+            except: pass
+            
+        if hasattr(context, "playwright_instance"):
+            try: await context.playwright_instance.stop()
+            except: pass
+            
+        if ix_profile_id:
+            from utils.ixbrowser_service import IxBrowserService
+            log_callback(f"🔌 Đang gọi ixBrowser API để đóng profile {ix_profile_id}...")
+            success, err = IxBrowserService.close_profile(ix_profile_id)
+            if not success:
+                log_callback(f"⚠️ Lỗi gửi yêu cầu đóng profile tới ixBrowser: {err}")
+    except Exception as e:
+        log_callback(f"⚠️ Lỗi dọn dẹp trình duyệt: {e}")
+
+
+def fix_sandbox_permissions_async(log_callback=print):
+    """
+    Chạy icacls trong luồng phụ (background thread) để tránh làm treo ứng dụng lúc khởi động.
+    """
+    def run_fix():
+        global _permissions_fixed
+        if _permissions_fixed or os.name != 'nt':
+            return
+        try:
+            import subprocess
+            for path_name in ["142-0102", "orbita-browser-141"]:
+                dir_path = os.path.join(BASE_DIR, path_name)
+                if os.path.exists(dir_path):
+                    log_callback(f"🛡️ [Background] Đang phân quyền Sandbox cho thư mục {path_name}...")
+                    subprocess.run(
+                        f'icacls "{dir_path}" /grant *S-1-15-2-1:(OI)(CI)(RX) /T',
+                        shell=True,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL
+                    )
+            _permissions_fixed = True
+            log_callback("🛡️ [Background] Hoàn tất phân quyền Sandbox!")
+        except Exception as ex:
+            log_callback(f"⚠️ [Background] Lỗi phân quyền Sandbox: {ex}")
+
+    import threading
+    threading.Thread(target=run_fix, daemon=True).start()
+
