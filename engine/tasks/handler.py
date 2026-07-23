@@ -203,7 +203,7 @@ async def handle_prompt_to_image_veo3_async(context, file_batch, assets_path, pr
         log_callback(f"📦 [Veo3] Bắt đầu xử lý {total_items} ảnh, chia làm {total_chunks} chunk (mỗi chunk {CHUNK_SIZE} ảnh).")
 
         # Thiết lập giao diện vẽ ảnh Google Labs ImageFX lần đầu
-        await setup_image_creation_mode_veo3(page)
+        page = await setup_image_creation_mode_veo3(page)
         await inject_radar_js_veo3(page)
         await page.context.add_init_script(STEALTH_SCRIPT)
 
@@ -234,7 +234,7 @@ async def handle_prompt_to_image_veo3_async(context, file_batch, assets_path, pr
                 await page.wait_for_timeout(4000)
                 
                 # Nạp lại cấu hình và Radar JS sau F5
-                await setup_image_creation_mode_veo3(page)
+                page = await setup_image_creation_mode_veo3(page)
                 await inject_radar_js_veo3(page)
                 await page.context.add_init_script(STEALTH_SCRIPT)
                 log_callback("✅ [Veo3] Tẩy trắng thành công! Sẵn sàng cho Chunk tiếp theo.")

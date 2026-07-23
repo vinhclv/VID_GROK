@@ -179,12 +179,19 @@ async def init_driver_from_profile_playwright(profile_folder_path, log_callback=
                 """
                 await context.add_init_script(init_js)
 
-                # Tự động đẩy cửa sổ trình duyệt lên trước mặt (Restore & Bring to front)
+                # Tự động dọn dẹp các tab cũ tồn đọng từ phiên trước và đẩy cửa sổ lên trước mặt
                 try:
-                    page = context.pages[0] if context.pages else await context.new_page()
-                    await page.bring_to_front()
+                    clean_page = await context.new_page()
+                    for old_page in list(context.pages):
+                        if old_page != clean_page:
+                            try:
+                                await old_page.close()
+                            except:
+                                pass
+
+                    await clean_page.bring_to_front()
                     # Khôi phục trạng thái cửa sổ về bình thường (unminimize) nếu đang ẩn dưới Taskbar
-                    client = await context.new_cdp_session(page)
+                    client = await context.new_cdp_session(clean_page)
                     win_info = await client.send("Browser.getWindowForTarget")
                     win_id = win_info.get("windowId")
                     if win_id:
@@ -192,8 +199,8 @@ async def init_driver_from_profile_playwright(profile_folder_path, log_callback=
                             "windowId": win_id,
                             "bounds": {"windowState": "normal"}
                         })
-                except:
-                    pass
+                except Exception as ex_clean:
+                    log_callback(f"⚠️ Lỗi nhỏ khi dọn dẹp tab: {ex_clean}")
 
                 return context
                 
@@ -321,6 +328,19 @@ async def init_driver_from_profile_playwright(profile_folder_path, log_callback=
         }})();
         """
         await context.add_init_script(init_js)
+
+        # Dọn dẹp tab cũ tồn đọng từ phiên làm việc trước
+        try:
+            clean_page = await context.new_page()
+            for old_page in list(context.pages):
+                if old_page != clean_page:
+                    try:
+                        await old_page.close()
+                    except:
+                        pass
+        except:
+            pass
+
         return context
 
     except Exception as e:

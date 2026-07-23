@@ -16,7 +16,8 @@ async def setup_image_format_ui(page: Page):
     """
     # 0. Chuyển sang tab Hình ảnh (Image)
     try:
-        btn_img = page.locator("button[role='radio']:has(span:text-is('Image')), button[role='radio']:has(span:text-is('Hình ảnh'))").first
+        # Grok dùng nút radio đầu tiên trong toolbar (icon duy nhất không chữ) hoặc nút chứa chữ Image/Hình ảnh
+        btn_img = page.locator("button[role='radio']:has-text('Image'), button[role='radio']:has-text('Hình ảnh'), [role='radiogroup'] button[role='radio']:first-child").first
         if await btn_img.is_visible(timeout=2000):
             await human_click(btn_img, page)
             await page.wait_for_timeout(1000)
@@ -134,7 +135,7 @@ async def process_prompt_to_image_grok_async(page: Page, item: dict, log_callbac
 
         # --- 0. CLICK NÚT HISTORY ĐỂ DỌN CONTEXT / PARENT ID TRANH BỊ DÍNH ---
         try:
-            btn_history = page.locator("button[data-tour-id='imagine-tour-history'], button:has-text('History'), button:has-text('Lịch sử')").first
+            btn_history = page.locator("button[aria-label='Lịch sử'], button[aria-label='History'], button[aria-label*='Lịch sử'], button[aria-label*='History'], button[data-tour-id='imagine-tour-history'], button:has-text('History'), button:has-text('Lịch sử')").first
             if await btn_history.is_visible(timeout=3000):
                 await human_click(btn_history, page)
                 log_callback(f"➡️ Đã click nút History (STT {stt})")

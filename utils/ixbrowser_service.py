@@ -1,6 +1,7 @@
 import requests
 import config
 import threading
+import time
 
 class IxBrowserService:
     _open_lock = threading.Lock()
@@ -129,16 +130,19 @@ class IxBrowserService:
                 
                 # 2. Xử lý khi báo lỗi "already open"
                 if "already open" in err_msg.lower():
-                    # Kiểm tra xem profile có thực sự đang mở không
-                    opened_list = cls.get_opened_profiles()
-                    for op in opened_list:
-                        if op.get("profile_id") == profile_id:
-                            ws_url = op.get("ws")
-                            if ws_url:
-                                return True, None, ws_url
+                    # Thử 3 lần (chờ 1.5s mỗi lần) để đợi ixBrowser cập nhật danh sách profile đang mở thực tế
+                    for _ in range(3):
+                        opened_list = cls.get_opened_profiles()
+                        for op in opened_list:
+                            if op.get("profile_id") == profile_id:
+                                ws_url = op.get("ws")
+                                if ws_url:
+                                    return True, None, ws_url
+                        time.sleep(1.5)
                     
-                    # Nếu không có trong danh sách đang mở thực tế -> Bị kẹt DB -> Reset và thử lại
+                    # Nếu sau 3 lần kiểm tra (4.5s) mà thực sự không có trong opened_list -> Kẹt DB -> Reset và thử lại
                     cls.reset_profile_status(profile_id)
+                    time.sleep(1.0)
                     
                     # Thử mở lại lần 2
                     r_retry = requests.post(f"{api_url}/api/v2/profile-open", json=payload, headers=headers, timeout=60)

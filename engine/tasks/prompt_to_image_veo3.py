@@ -47,12 +47,23 @@ async def human_type(locator: Locator, text: str, page: Page):
 # ⚙️ CẤU HÌNH GIAO DIỆN & TIÊM RADAR JS VEO3
 # ==========================================
 
-async def setup_image_creation_mode_veo3(page: Page):
+async def setup_image_creation_mode_veo3(page: Page) -> Page:
     """
     Cấu hình giao diện vẽ ảnh Google Labs ImageFX và thiết lập Authorization Interceptor.
+    Tự động dọn dẹp các tab thừa và chuyển sang tab mới khi bấm Tạo dự án.
     """
     print("⚙️ [Veo3] Đang cấu hình giao diện vẽ ảnh (Aspect Ratio / Model)...")
     
+    # Dọn dẹp tất cả các tab rác trước đó trong context
+    try:
+        pages = list(page.context.pages)
+        for p in pages:
+            if p != page and not p.is_closed():
+                try: await p.close()
+                except: pass
+    except Exception:
+        pass
+
     # Thiết lập gián điệp để chộp lấy Header Auth của Google
     if not hasattr(page, 'auth_cache'):
         page.auth_cache = {}
@@ -68,54 +79,65 @@ async def setup_image_creation_mode_veo3(page: Page):
     page.on("request", intercept_auth)
 
     try:
-        # 1. Tạo dự án
+        # 1. Tạo dự án (Chỉ bấm nếu nút add_2 hiển thị trên dashboard)
         create_btn = page.locator("i:has-text('add_2')").first
-        await create_btn.wait_for(state="visible", timeout=45000)
-        await human_click(create_btn, page)
-        await page.wait_for_timeout(1500)
+        if await create_btn.is_visible(timeout=5000):
+            await human_click(create_btn, page)
+            await page.wait_for_timeout(2500)
+
+            # Nếu bấm nút add_2 mở ra Tab mới trong Chrome -> đóng tab cũ và lấy tab mới nhất
+            all_pages = list(page.context.pages)
+            if len(all_pages) > 1:
+                new_active_page = all_pages[-1]
+                for p in all_pages:
+                    if p != new_active_page and not p.is_closed():
+                        try: await p.close()
+                        except: pass
+                page = new_active_page
+                print("✅ [Veo3] Đã chuyển sang Tab dự án mới và dọn dẹp Tab cũ.")
 
         # 2. Huỷ option tác nhân
         close_btn = page.locator("xpath=/html/body/div[1]/div[1]/div[5]/div/div/div/div/div[2]/div[1]/div/button[2]").first
-        await close_btn.wait_for(state="visible", timeout=15000)
-        
-        aria_pressed = await close_btn.get_attribute("aria-pressed")
-        if aria_pressed == "true":
-            await human_click(close_btn, page)
-            await page.wait_for_timeout(500)
-            print("✅ [Veo3] Đã huỷ option tác nhân thành công.")
+        if await close_btn.is_visible(timeout=5000):
+            aria_pressed = await close_btn.get_attribute("aria-pressed")
+            if aria_pressed == "true":
+                await human_click(close_btn, page)
+                await page.wait_for_timeout(500)
+                print("✅ [Veo3] Đã huỷ option tác nhân thành công.")
 		
         # 3. Chọn chế độ
         mode_btn = page.locator("xpath=/html/body/div[1]/div[1]/div[5]/div/div/div/div/div[2]/div[2]/button[1]").last
-        await mode_btn.wait_for(state="visible", timeout=15000)
-        await human_click(mode_btn, page)
-        await page.wait_for_timeout(500)
+        if await mode_btn.is_visible(timeout=5000):
+            await human_click(mode_btn, page)
+            await page.wait_for_timeout(500)
 
         # 4. Chọn hình ảnh
         image_btn = page.locator("i:has-text('image')").last
-        await image_btn.wait_for(state="visible", timeout=15000)
-        await human_click(image_btn, page)
-        await page.wait_for_timeout(500)
+        if await image_btn.is_visible(timeout=5000):
+            await human_click(image_btn, page)
+            await page.wait_for_timeout(500)
         
         # 5. Tự động chọn Aspect Ratio từ cấu hình
         system_cfg = config.global_settings.get('system', {})
         aspect_ratio = system_cfg.get('aspect_ratio', '9:16') # Mặc định 16:9
         
-        # Dùng regex kết thúc bằng tỉ lệ (ví dụ: r"1:1$") để loại bỏ tên icon như "crop_square1:1"
         ratio_btn = page.locator("button", has_text=re.compile(rf"{aspect_ratio}$", re.IGNORECASE)).first
-        await ratio_btn.wait_for(state="visible", timeout=15000)
-        await human_click(ratio_btn, page)
-        print(f"✅ [Veo3] Đã cấu hình Aspect Ratio qua UI: {aspect_ratio}")
-        await page.wait_for_timeout(500)
+        if await ratio_btn.is_visible(timeout=5000):
+            await human_click(ratio_btn, page)
+            print(f"✅ [Veo3] Đã cấu hình Aspect Ratio qua UI: {aspect_ratio}")
+            await page.wait_for_timeout(500)
 
         # 6. Tự động chọn số lượng ảnh là 1 (1x)
         qty_btn = page.locator("button", has_text=re.compile(r"1x$", re.IGNORECASE)).first
-        await qty_btn.wait_for(state="visible", timeout=15000)
-        await human_click(qty_btn, page)
-        print("✅ [Veo3] Đã cấu hình số lượng ảnh tự động: 1x")
-        await page.wait_for_timeout(500)
+        if await qty_btn.is_visible(timeout=5000):
+            await human_click(qty_btn, page)
+            print("✅ [Veo3] Đã cấu hình số lượng ảnh tự động: 1x")
+            await page.wait_for_timeout(500)
 
     except Exception as e:
         print(f"⚠️ [Veo3] Bỏ qua thiết lập Aspect Ratio / Số lượng: {e}")
+
+    return page
 
 
 async def inject_radar_js_veo3(page: Page):

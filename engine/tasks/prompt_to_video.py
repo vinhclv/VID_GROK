@@ -106,31 +106,41 @@ def parse_duration_to_seconds(timecode_str: str) -> float:
     except:
         return 6.0
 
-async def setup_video_duration_ui(page: Page, video_length: int):
+async def setup_video_duration_ui(page: Page, video_length: int, log_callback=print):
     try:
         target_label = f'{video_length}s'
         btn = page.locator(f"button:has-text('{target_label}'), div:text-is('{target_label}')").last
         if await btn.is_visible(timeout=3000):
             await human_click(btn, page)
-            print(f'✅ Đã click chọn thời lượng {target_label} qua UI')
+            log_callback(f'✅ Đã click chọn thời lượng {target_label} qua UI')
     except Exception as e:
-        print(f'⚠️ Chưa chọn được thời lượng qua UI (Bỏ qua)')
+        log_callback(f'⚠️ Chưa chọn được thời lượng qua UI (Bỏ qua)')
 
-async def setup_video_format_ui(page: Page):
+async def setup_video_format_ui(page: Page, log_callback=print):
     """
     Tự động đọc cấu hình Aspect Ratio (Tỉ lệ) và Resolution (Độ phân giải) 
     từ file settings.json (nằm trong config.global_settings['system'])
     """
     # 0. Chuyển sang tab Video
     try:
-        # Tìm chính xác nút radio Video ở toolbar dưới (không match sidebar)
-        btn_video = page.locator("button[role='radio']:has(span:text-is('Video'))").first
+        # Khi ở tab Hình ảnh, nút Video bị co lại chỉ còn icon camera (không có text chữ)
+        # Nút thứ 2 trong nhóm radio (radiogroup) chính là nút Video
+        btn_video = page.locator(
+            "button[role='radio']:has-text('Video'), "
+            "button[role='radio'][aria-label*='Video'], "
+            "button[role='radio'][aria-label*='video'], "
+            "[role='radiogroup'] button[role='radio']:nth-child(2), "
+            "form button[role='radio']:nth-child(2)"
+        ).first
+
         if await btn_video.is_visible(timeout=2000):
-            await human_click(btn_video, page)
-            print(f'✅ Đã click chuyển sang tab Video')
-            await page.wait_for_timeout(1000)
+            aria_checked = await btn_video.get_attribute("aria-checked")
+            if aria_checked != "true":
+                await human_click(btn_video, page)
+                log_callback(f'✅ Đã click chuyển sang tab Video')
+                await page.wait_for_timeout(1000)
     except Exception as e:
-        pass
+        log_callback(f'⚠️ Lỗi chuyển tab Video: {e}')
 
     system_cfg = config.global_settings.get('system', {})
     aspect_ratio = system_cfg.get('aspect_ratio', '16:9') # Mặc định 16:9
@@ -149,18 +159,18 @@ async def setup_video_format_ui(page: Page):
                 option_btn = page.locator(f"text='{aspect_ratio}'").last
                 if await option_btn.is_visible(timeout=2000):
                     await human_click(option_btn, page)
-                    print(f'✅ Đã đổi tỉ lệ khung hình thành: {aspect_ratio}')
+                    log_callback(f'✅ Đã đổi tỉ lệ khung hình thành: {aspect_ratio}')
     except Exception as e:
-        print(f'⚠️ Bỏ qua chọn Tỉ lệ: {e}')
+        log_callback(f'⚠️ Bỏ qua chọn Tỉ lệ: {e}')
 
     # 2. Chọn Resolution
     try:
         res_btn = page.locator(f"button:has-text('{resolution}'), div:text-is('{resolution}')").last
         if await res_btn.is_visible(timeout=2000):
             await human_click(res_btn, page)
-            print(f'✅ Đã chọn độ phân giải: {resolution}')
+            log_callback(f'✅ Đã chọn độ phân giải: {resolution}')
     except Exception as e:
-        print(f'⚠️ Bỏ qua chọn Độ phân giải: {e}')
+        log_callback(f'⚠️ Bỏ qua chọn Độ phân giải: {e}')
 
 async def process_1_image_video_batch(page: Page, file_batch: list, output_folder: str, log_callback=print):
     """
@@ -201,7 +211,7 @@ async def process_1_image_video_batch(page: Page, file_batch: list, output_folde
     
     try:
         # Click nút History để dọn context / parent ID tránh bị dính
-        btn_history = page.locator("button[data-tour-id='imagine-tour-history'], button:has-text('History'), button:has-text('Lịch sử')").first
+        btn_history = page.locator("button[aria-label='Lịch sử'], button[aria-label='History'], button[aria-label*='Lịch sử'], button[aria-label*='History'], button[data-tour-id='imagine-tour-history'], button:has-text('History'), button:has-text('Lịch sử')").first
         if await btn_history.is_visible(timeout=3000):
             await human_click(btn_history, page)
             log_callback(f'➡️ Đã click nút History để dọn context trước khi chạy')
@@ -242,7 +252,7 @@ async def process_1_image_video_batch(page: Page, file_batch: list, output_folde
                 try:
                     await page.wait_for_timeout(random.uniform(2000, 3000))
                     # Tìm chính xác nút History bằng data-tour-id hoặc text (không sợ nhầm sang nút + Upload ảnh)
-                    btn_history = page.locator("button[data-tour-id='imagine-tour-history'], button:has-text('History'), button:has-text('Lịch sử')").first
+                    btn_history = page.locator("button[aria-label='Lịch sử'], button[aria-label='History'], button[aria-label*='Lịch sử'], button[aria-label*='History'], button[data-tour-id='imagine-tour-history'], button:has-text('History'), button:has-text('Lịch sử')").first
                     if await btn_history.is_visible(timeout=3000):
                         await human_click(btn_history, page)
                         log_callback(f'➡️ Đã click nút History để chuyển context (STT {stt})')
@@ -259,8 +269,8 @@ async def process_1_image_video_batch(page: Page, file_batch: list, output_folde
             await textbox.wait_for(state='visible', timeout=15000)
             
             # Click cấu hình thời lượng và định dạng video (Đã bao gồm click tab Video bên trong)
-            await setup_video_duration_ui(page, video_length)
-            await setup_video_format_ui(page)
+            await setup_video_duration_ui(page, video_length, log_callback)
+            await setup_video_format_ui(page, log_callback)
             
             # Focus
             await human_click(textbox, page)
