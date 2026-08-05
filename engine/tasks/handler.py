@@ -9,17 +9,20 @@ from urllib.parse import urlparse
 from engine.tasks.prompt_to_video import process_1_image_video_batch
 from engine.tasks.srt_to_prompt import process_srt_to_prompt_async
 from engine.tasks.prompt_to_image_grok import process_prompt_to_image_grok_async
-from engine.tasks.prompt_to_image_veo3 import (
-    setup_image_creation_mode_veo3,
-    inject_radar_js_veo3,
-    process_image_veo3_batch
-)
+from engine.tasks.prompt_to_image_veo3 import handle_prompt_to_image_veo3_async
+from engine.tasks.prompt_to_video_veo3 import handle_prompt_to_video_veo3_async
 from flow_captcha_solver.stealth import STEALTH_SCRIPT
 
 async def handle_1_image_prompt_video_async(context, file_batch, assets_path, prefix_prompt, url, log_callback):
     """
     Xử lý batch 1 image + prompt sang video (tự cấu hình timecode).
     """
+    if "grok.com" not in url.lower():
+        log_callback("ℹ️ Nhận diện URL Veo3/Google Flow -> Tự động chuyển sang luồng Veo3 Video riêng biệt.")
+        return await handle_prompt_to_video_veo3_async(
+            context, file_batch, assets_path, prefix_prompt, url, log_callback
+        )
+
     page = await context.new_page()
     await page.add_init_script("\n        Object.defineProperty(navigator, 'webdriver', {\n            get: () => undefined\n        });\n    ")
     try:
@@ -181,82 +184,7 @@ async def handle_prompt_to_image_grok_async(context, file_batch, assets_path, pr
 
 async def handle_prompt_to_image_veo3_async(context, file_batch, assets_path, prefix_prompt, url, log_callback):
     """
-    Xử lý vẽ ảnh từ Prompt bằng Playwright (Veo3/Flow - Chunk 4 song song qua Radar JS).
+    Ủy quyền cho Handler TẠO ẢNH chuyên biệt trong engine.tasks.prompt_to_image_veo3.
     """
-    page = await context.new_page()
-    await page.add_init_script("\n        Object.defineProperty(navigator, 'webdriver', {\n            get: () => undefined\n        });\n    ")
-    
-    try:
-        # 1. Điều hướng và kiểm tra đăng nhập
-        await page.goto(url, timeout=60000)
-        await page.wait_for_timeout(5000)
-        if 'accounts.google.com' in page.url:
-            log_callback('❌ Profile bị logout -> Dừng.')
-            return (False, file_batch)
-
-        # 2. BATCH CHUNK 4 & RADAR JS
-        CHUNK_SIZE = 4
-        all_failed_objects = []
-        total_items = len(file_batch)
-        total_chunks = (total_items + CHUNK_SIZE - 1) // CHUNK_SIZE
-
-        log_callback(f"📦 [Veo3] Bắt đầu xử lý {total_items} ảnh, chia làm {total_chunks} chunk (mỗi chunk {CHUNK_SIZE} ảnh).")
-
-        # Thiết lập giao diện vẽ ảnh Google Labs ImageFX lần đầu
-        page = await setup_image_creation_mode_veo3(page)
-        await inject_radar_js_veo3(page)
-        await page.context.add_init_script(STEALTH_SCRIPT)
-
-        for i in range(0, total_items, CHUNK_SIZE):
-            chunk = file_batch[i:i + CHUNK_SIZE]
-            chunk_index = (i // CHUNK_SIZE) + 1
-            
-            log_callback(f"▶️ --- [Veo3] ĐANG CHẠY CHUNK {chunk_index}/{total_chunks} ---")
-
-            # Gọi hàm xử lý cốt lõi cho đúng 4 object này
-            is_chunk_ok, failed_in_chunk = await process_image_veo3_batch(
-                page, 
-                chunk, 
-                assets_path, 
-                log_callback
-            )
-            
-            all_failed_objects.extend(failed_in_chunk)
-
-            # Nếu có ảnh xịt -> Reset dọn reCAPTCHA/F5 để tẩy trắng trạng thái kẹt
-            if len(failed_in_chunk) > 1:
-                log_callback("⚠️ [Veo3] Phát hiện kẹt vẽ ảnh! Đang tẩy trắng reCAPTCHA và reload...")
-                await page.evaluate("""
-                    localStorage.removeItem('_grecaptcha');
-                    sessionStorage.clear();
-                """)
-                await page.reload(timeout=60000)
-                await page.wait_for_timeout(4000)
-                
-                # Nạp lại cấu hình và Radar JS sau F5
-                page = await setup_image_creation_mode_veo3(page)
-                await inject_radar_js_veo3(page)
-                await page.context.add_init_script(STEALTH_SCRIPT)
-                log_callback("✅ [Veo3] Tẩy trắng thành công! Sẵn sàng cho Chunk tiếp theo.")
-
-            # Cooldown nghỉ ngơi chống spam giữa các chunk
-            if i + CHUNK_SIZE < total_items:
-                cooldown = random.randint(5000, 7000)
-                log_callback(f"💤 Xong Chunk {chunk_index}. Nghỉ giải lao {cooldown//1000}s trước khi chạy mẻ tiếp theo...")
-                await page.wait_for_timeout(cooldown)
-
-        if len(all_failed_objects) == total_items:
-            log_callback("❌ [Veo3] Toàn bộ file trong lượt này đều thất bại.")
-            return (False, all_failed_objects)
-
-        return (True, all_failed_objects)
-    except Exception as e:
-        if e.__class__.__name__ == "RateLimitException":
-            raise e
-        log_callback(f'❌ Lỗi ở handle_prompt_to_image_veo3_async: {e}')
-        return (False, file_batch)
-    finally:
-        try:
-            await page.close()
-        except:
-            pass
+    from engine.tasks.prompt_to_image_veo3 import handle_prompt_to_image_veo3_async as _handle_image
+    return await _handle_image(context, file_batch, assets_path, prefix_prompt, url, log_callback)

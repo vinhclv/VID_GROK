@@ -1,10 +1,10 @@
 {
     "system": {
         "max_threads": 1,
-        "loop_limit": 4,
+        "loop_limit": 2,
         "max_retries": 3,
         "max_stt_retries": 1,
-        "wait_time": 41,
+        "wait_time": 80,
         "aspect_ratio": "9:16",
         "resolution": "480p",
         "browser_type": "ixBrowser (Local API)",

@@ -142,15 +142,7 @@ def get_1_image_prompt_video_status(json_path, img_dir, out_dir):
             prompt_text = item.get("prompt", "")
             characters_str = item.get("character", "")
             
-            start_time_str = "00-00-00-000"
-            if timecode:
-                try:
-                    start_part = timecode.split("-->")[0].strip()
-                    start_time_str = start_part.replace(":", "-").replace(",", "-")
-                except:
-                    pass
-                    
-            expected_video_path = os.path.join(out_dir, f"{start_time_str}.mp4")
+            expected_video_path = os.path.join(out_dir, f"{stt}.mp4")
             
             image_paths = []
             skip_item = False
@@ -217,16 +209,12 @@ def get_stretch_video_status(json_path, video_in_dir, out_dir):
             stt = str(item.get("STT"))
             timecode = item.get("timecode", "")
             
-            start_time_str = "00-00-00-000"
             duration = 5.0
             
             if timecode:
                 try:
                     parts = timecode.split("-->")
                     if len(parts) == 2:
-                        start_part = parts[0].strip()
-                        start_time_str = start_part.replace(":", "-").replace(",", "-")
-                        
                         def to_seconds(tc):
                             tc = tc.strip()
                             h, m, s = tc.split(':')
@@ -237,8 +225,8 @@ def get_stretch_video_status(json_path, video_in_dir, out_dir):
                 except:
                     pass
                     
-            input_video_path = os.path.join(video_in_dir, f"{start_time_str}.mp4")
-            output_video_path = os.path.join(out_dir, f"{start_time_str}.mp4")
+            input_video_path = os.path.join(video_in_dir, f"{stt}.mp4")
+            output_video_path = os.path.join(out_dir, f"{stt}.mp4")
 
             task_item = {
                 "STT": stt,
@@ -278,21 +266,10 @@ def validate_stretch_videos(json_path, video_in_dir):
         missing_files = []
         for item in data:
             stt = str(item.get("STT"))
-            timecode = item.get("timecode", "")
-            start_time_str = "00-00-00-000"
-            
-            if timecode:
-                try:
-                    parts = timecode.split("-->")
-                    if len(parts) == 2:
-                        start_part = parts[0].strip()
-                        start_time_str = start_part.replace(":", "-").replace(",", "-")
-                except:
-                    pass
                     
-            input_video_path = os.path.join(video_in_dir, f"{start_time_str}.mp4")
+            input_video_path = os.path.join(video_in_dir, f"{stt}.mp4")
             if not os.path.exists(input_video_path):
-                missing_files.append(f"STT: {stt} -> {start_time_str}.mp4")
+                missing_files.append(f"STT: {stt} -> {stt}.mp4")
                 
         if missing_files:
             err_msg = f"Thiếu {len(missing_files)} file video so với JSON!\nCác file bị thiếu:\n" + "\n".join(missing_files[:5])
@@ -327,16 +304,12 @@ def get_image_to_video_status(json_path, img_dir, out_dir):
                 
             timecode = item.get("timecode", "").strip()
             
-            start_time_str = "00-00-00-000"
             duration = 5.0
             
             if timecode:
                 try:
                     parts = timecode.split("-->")
                     if len(parts) == 2:
-                        start_part = parts[0].strip()
-                        start_time_str = start_part.replace(":", "-").replace(",", "-")
-                        
                         def to_seconds(tc):
                             tc = tc.strip()
                             h, m, s = tc.split(':')
@@ -355,7 +328,7 @@ def get_image_to_video_status(json_path, img_dir, out_dir):
                 # Không tìm thấy ảnh tĩnh cảnh cho phân đoạn này -> Bỏ qua
                 continue
                 
-            output_video_path = os.path.join(out_dir, f"{start_time_str}.mp4")
+            output_video_path = os.path.join(out_dir, f"{stt}.mp4")
 
             task_item = {
                 "STT": stt,

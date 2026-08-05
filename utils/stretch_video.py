@@ -115,18 +115,11 @@ def merge_videos_ffmpeg(json_path, out_dir, log_callback=print):
         # Thu thập danh sách các file cần ghép theo đúng thứ tự JSON
         video_files = []
         for item in data:
-            timecode = item.get("timecode", "")
-            start_time_str = "00-00-00-000"
-            if timecode:
-                try:
-                    parts = timecode.split("-->")
-                    if len(parts) == 2:
-                        start_part = parts[0].strip()
-                        start_time_str = start_part.replace(":", "-").replace(",", "-")
-                except:
-                    pass
+            stt = str(item.get("STT", "")).strip()
+            if not stt:
+                continue
             
-            vid_path = os.path.join(out_dir, f"{start_time_str}.mp4")
+            vid_path = os.path.join(out_dir, f"{stt}.mp4")
             if os.path.exists(vid_path):
                 # FFmpeg concat yêu cầu đường dẫn tuyệt đối phải được format an toàn, hoặc dùng đường dẫn tương đối
                 # Tốt nhất nên chuyển đường dẫn thành dạng an toàn: thay \ thành /

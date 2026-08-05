@@ -2,35 +2,27 @@ import os
 import time
 import random
 import json
-import re
 from PIL import Image
 from playwright.async_api import Page, Locator
 import config
+from flow_captcha_solver.stealth import STEALTH_SCRIPT
 
 # ==========================================
 # 🤖 HỆ THỐNG MÔ PHỎNG HÀNH VI NGƯỜI THẬT
 # ==========================================
 
 async def human_click(locator: Locator, page: Page, force: bool = False):
-    """
-    Mô phỏng click chuột của người thật bằng Virtual Mouse.
-    """
     try:
         await locator.scroll_into_view_if_needed(timeout=5000)
         await locator.hover(timeout=5000)
         await page.wait_for_timeout(random.uniform(100, 300))
         await locator.click(delay=random.randint(50, 150), force=force)
-    except Exception as e:
-        print(f"⚠️ Chuyển sang click dự phòng: {e}")
+    except Exception:
         await locator.click(delay=random.randint(50, 150), force=True)
 
 async def human_type(locator: Locator, text: str, page: Page):
-    """
-    Mô phỏng gõ phím theo cụm (chunk) với tốc độ và nhịp thở của người thật.
-    """
     await human_click(locator, page)
     await page.wait_for_timeout(random.uniform(200, 400))
-
     idx = 0
     while idx < len(text):
         chunk_size = random.randint(15, 30)
@@ -44,17 +36,12 @@ async def human_type(locator: Locator, text: str, page: Page):
 
 
 # ==========================================
-# ⚙️ CẤU HÌNH GIAO DIỆN & TIÊM RADAR JS VEO3
+# ⚙️ CẤU HÌNH GIAO DIỆN VEO3 IMAGE
 # ==========================================
 
-async def setup_image_creation_mode_veo3(page: Page) -> Page:
-    """
-    Cấu hình giao diện vẽ ảnh Google Labs ImageFX và thiết lập Authorization Interceptor.
-    Tự động dọn dẹp các tab thừa và chuyển sang tab mới khi bấm Tạo dự án.
-    """
-    print("⚙️ [Veo3] Đang cấu hình giao diện vẽ ảnh (Aspect Ratio / Model)...")
+async def setup_image_creation_mode_veo3(page: Page, log_callback=print) -> Page:
+    log_callback("⚙️ [Veo3 Image] Đang kiểm tra giao diện làm việc...")
     
-    # Dọn dẹp tất cả các tab rác trước đó trong context
     try:
         pages = list(page.context.pages)
         for p in pages:
@@ -64,7 +51,6 @@ async def setup_image_creation_mode_veo3(page: Page) -> Page:
     except Exception:
         pass
 
-    # Thiết lập gián điệp để chộp lấy Header Auth của Google
     if not hasattr(page, 'auth_cache'):
         page.auth_cache = {}
         
@@ -79,187 +65,206 @@ async def setup_image_creation_mode_veo3(page: Page) -> Page:
     page.on("request", intercept_auth)
 
     try:
-        # 1. Tạo dự án (Chỉ bấm nếu nút add_2 hiển thị trên dashboard)
-        create_btn = page.locator("i:has-text('add_2')").first
-        if await create_btn.is_visible(timeout=5000):
-            await human_click(create_btn, page)
-            await page.wait_for_timeout(2500)
+        if "/project/" not in page.url:
+            create_btn = page.locator("button:has-text('New project')").first
+            if await create_btn.is_visible(timeout=3000):
+                log_callback("➡️ [Veo3 Image] Mở dự án mới trên Dashboard...")
+                await human_click(create_btn, page)
+                await page.wait_for_timeout(2000)
 
-            # Nếu bấm nút add_2 mở ra Tab mới trong Chrome -> đóng tab cũ và lấy tab mới nhất
-            all_pages = list(page.context.pages)
-            if len(all_pages) > 1:
-                new_active_page = all_pages[-1]
-                for p in all_pages:
-                    if p != new_active_page and not p.is_closed():
-                        try: await p.close()
-                        except: pass
-                page = new_active_page
-                print("✅ [Veo3] Đã chuyển sang Tab dự án mới và dọn dẹp Tab cũ.")
+                all_pages = list(page.context.pages)
+                if len(all_pages) > 1:
+                    new_active_page = all_pages[-1]
+                    for p in all_pages:
+                        if p != new_active_page and not p.is_closed():
+                            try: await p.close()
+                            except: pass
+                    page = new_active_page
 
-        # 2. Huỷ option tác nhân
-        close_btn = page.locator("xpath=/html/body/div[1]/div[1]/div[5]/div/div/div/div/div[2]/div[1]/div/button[2]").first
-        if await close_btn.is_visible(timeout=5000):
-            aria_pressed = await close_btn.get_attribute("aria-pressed")
-            if aria_pressed == "true":
-                await human_click(close_btn, page)
+        textbox = page.locator("[role='textbox'], textarea, [contenteditable='true']").first
+        try:
+            await textbox.wait_for(state="visible", timeout=20000)
+            log_callback("✅ [Veo3 Image] Giao diện dự án đã sẵn sàng!")
+        except Exception:
+            pass
+
+        try:
+            close_btn = page.locator("button:has-text('Agent'), button[aria-label*='Agent']").first
+            if await close_btn.is_visible(timeout=1000):
+                aria_pressed = await close_btn.get_attribute("aria-pressed")
+                if aria_pressed == "true":
+                    await human_click(close_btn, page)
+                    log_callback("✅ [Veo3 Image] Đã tắt chế độ Agent.")
+                    await page.wait_for_timeout(1000)
+        except Exception:
+            pass
+
+        settings_pill_btn = page.locator("form button.ldbhld, button.ldbhld, button:has-text('Video -'), button:has-text('Image -')").first
+        if await settings_pill_btn.is_visible(timeout=3000):
+            await human_click(settings_pill_btn, page)
+            await page.wait_for_timeout(1000)
+
+            mode_btn = page.locator("button:has-text('Image'), [role='tab']:has-text('Image'), [id*='trigger-IMAGE']").first
+            if await mode_btn.is_visible(timeout=2000):
+                await human_click(mode_btn, page)
+                log_callback("⚙️ [Veo3 Image] Tab: Image")
                 await page.wait_for_timeout(500)
-                print("✅ [Veo3] Đã huỷ option tác nhân thành công.")
-		
-        # 3. Chọn chế độ
-        mode_btn = page.locator("xpath=/html/body/div[1]/div[1]/div[5]/div/div/div/div/div[2]/div[2]/button[1]").last
-        if await mode_btn.is_visible(timeout=5000):
-            await human_click(mode_btn, page)
-            await page.wait_for_timeout(500)
 
-        # 4. Chọn hình ảnh
-        image_btn = page.locator("i:has-text('image')").last
-        if await image_btn.is_visible(timeout=5000):
-            await human_click(image_btn, page)
-            await page.wait_for_timeout(500)
-        
-        # 5. Tự động chọn Aspect Ratio từ cấu hình
-        system_cfg = config.global_settings.get('system', {})
-        aspect_ratio = system_cfg.get('aspect_ratio', '9:16') # Mặc định 16:9
-        
-        ratio_btn = page.locator("button", has_text=re.compile(rf"{aspect_ratio}$", re.IGNORECASE)).first
-        if await ratio_btn.is_visible(timeout=5000):
-            await human_click(ratio_btn, page)
-            print(f"✅ [Veo3] Đã cấu hình Aspect Ratio qua UI: {aspect_ratio}")
-            await page.wait_for_timeout(500)
+            # 2. Tự động chọn Aspect Ratio (16:9 / 9:16 / 1:1) từ cấu hình hệ thống
+            system_cfg = config.global_settings.get('system', {})
+            aspect_ratio = str(system_cfg.get('aspect_ratio', '16:9')).strip()
 
-        # 6. Tự động chọn số lượng ảnh là 1 (1x)
-        qty_btn = page.locator("button", has_text=re.compile(r"1x$", re.IGNORECASE)).first
-        if await qty_btn.is_visible(timeout=5000):
-            await human_click(qty_btn, page)
-            print("✅ [Veo3] Đã cấu hình số lượng ảnh tự động: 1x")
-            await page.wait_for_timeout(500)
+            ratio_btn = page.locator(f"button:has-text('{aspect_ratio}')").first
+            try:
+                if await ratio_btn.is_visible(timeout=2000):
+                    await human_click(ratio_btn, page)
+                    log_callback(f"⚙️ [Veo3 Image] Tỉ lệ: {aspect_ratio}")
+                    await page.wait_for_timeout(800)
+            except Exception:
+                pass
+
+            # 3. Tự động chọn số lượng x1
+            qty_btn = page.locator("button:has-text('x1'), button:has-text('1x')").first
+            try:
+                if await qty_btn.is_visible(timeout=2000):
+                    await human_click(qty_btn, page)
+                    log_callback("⚙️ [Veo3 Image] Số lượng: x1")
+                    await page.wait_for_timeout(800)
+            except Exception:
+                pass
+
+            # 4. Kiểm tra và xuất log Model Tạo Ảnh
+            try:
+                model_menu_btn = page.locator("xpath=/html/body/div[3]/div/button").first
+                if not await model_menu_btn.is_visible(timeout=1500):
+                    model_menu_btn = page.locator("button:has-text('Imagen'), button:has-text('Veo'), button:has(i:has-text('arrow_drop_down'))").first
+
+                if await model_menu_btn.is_visible(timeout=2000):
+                    current_model = await model_menu_btn.text_content() or ""
+                    log_callback(f"⚙️ [Veo3 Image] Model UI: {current_model.strip()}")
+            except Exception:
+                pass
 
     except Exception as e:
-        print(f"⚠️ [Veo3] Bỏ qua thiết lập Aspect Ratio / Số lượng: {e}")
+        log_callback(f"⚠️ [Veo3 Image] Bỏ qua cấu hình phụ UI: {e}")
 
     return page
 
 
-async def inject_radar_js_veo3(page: Page):
-    """
-    Tiêm radar JS tối giản cướp cò API batchGenerateImages để bắt sống FifeURL ảnh chất lượng gốc.
-    """
-    js_interceptor = r"""
+# ==========================================
+# 🛰️ RADAR JS INTERCEPTOR IMAGE
+# ==========================================
+
+async def inject_radar_js_veo3_image(page: Page):
+    raw_interceptor = r"""
     (function() {
         window._python_results = window._python_results || {};
         window._completedSTTs = window._completedSTTs || new Set(); 
+        window._activeMediaTasks = window._activeMediaTasks || {};
+        window._authToken = window._authToken || "";
         window._isInterceptorInjected = window._isInterceptorInjected || false;
 
         if (window._isInterceptorInjected) return;
         window._isInterceptorInjected = true;
-        console.log("%c[RADAR IMAGE] 🚀 ĐÃ BƠM RADAR BẮT FIFEURL VEO3...", "color: #00ffff; font-size: 16px; font-weight: bold;");
+        console.log("%c[RADAR IMAGE] 🚀 ĐÃ BƠM RADAR BẮT TOKEN VÀ LINK ẢNH VEO3...", "color: #00ffff; font-size: 16px; font-weight: bold;");
 
-        // 1. CHẶN XHR
+        function processMediaData(data) {
+            if (!data) return;
+            let mediaArr = data.media || (data.result && data.result.media) || (data.workflows && data.workflows[0] && data.workflows[0].media) || [];
+            if (!Array.isArray(mediaArr) && typeof mediaArr === 'object') mediaArr = [mediaArr];
+
+            mediaArr.forEach(item => {
+                let name = item?.name;
+                let projectId = item?.projectId;
+                let genObj = item?.image?.generatedImage || item?.generatedImage || item?.image || item;
+                let meta = item?.mediaMetadata || {};
+                let reqData = genObj?.requestData || meta?.requestData || {};
+                
+                let raw = reqData?.promptInputs?.[0]?.textInput || "";
+                let rawPart = reqData?.promptInputs?.[0]?.structuredPrompt?.parts?.[0]?.text || "";
+                let gen = genObj?.prompt || item?.prompt || meta?.mediaTitle || "";
+                let fullText = `${raw} | ${rawPart} | ${gen}`;
+                
+                let match = fullText.match(/\|\|(.*?)\|\|/);
+                let stt = match ? (match[1] || "").trim() : null;
+
+                if (name && stt && projectId) {
+                    window._activeMediaTasks[name] = { name: name, projectId: projectId, stt: stt };
+                }
+
+                let currentStt = stt || (name && window._activeMediaTasks[name]?.stt);
+
+                let fileUrl = genObj?.servingUrl || genObj?.fifeUrl || genObj?.downloadUrl || 
+                              item?.image?.servingUrl || item?.image?.fifeUrl || item?.servingUrl || meta?.servingUrl;
+
+                if (fileUrl && currentStt && !window._completedSTTs.has(currentStt)) {
+                    window._completedSTTs.add(currentStt);
+                    window._python_results[currentStt] = fileUrl;
+                    console.log("[RADAR IMAGE] 🎯 Tóm thành công URL Ảnh cho STT " + currentStt + ": " + fileUrl);
+                }
+            });
+        }
+
         const origSend = XMLHttpRequest.prototype.send;
         XMLHttpRequest.prototype.send = function() {
             this.addEventListener('load', function() {
-                if (this._intercept_url && (this._intercept_url.includes("batchGenerateImages") || this._intercept_url.includes("flowMedia"))) {
+                const u = (this._intercept_url || "").toLowerCase();
+                if (u.includes("image") || u.includes("media") || u.includes("batch") || u.includes("flow")) {
                     try {
                         let text = this.responseText.replace(/^\)\]\}'\n/, '');
                         let data = JSON.parse(text);
-                        let mediaArr = data.media || (data.result && data.result.media) || [];
-                        
-                        mediaArr.forEach(item => {
-                            let genImage = item?.image?.generatedImage;
-                            let raw = genImage?.requestData?.promptInputs?.[0]?.textInput || "";
-                            let rawPart = genImage?.requestData?.promptInputs?.[0]?.structuredPrompt?.parts?.[0]?.text || "";
-                            let gen = genImage?.prompt || "";
-                            
-                            let match = (`${raw} | ${rawPart} | ${gen}`).match(/\|\|(.*?)\|\|/);
-
-                            if (match) {
-                                let stt = (match[1] || "").trim();
-                                let fifeUrl = genImage?.fifeUrl;
-                                if (fifeUrl && stt && !window._completedSTTs.has(stt)) {
-                                    window._completedSTTs.add(stt);
-                                    window._python_results[stt] = fifeUrl;
-                                    console.log("[RADAR IMAGE] 🎯 Tóm được FifeURL ảnh gốc cho STT " + stt + ": " + fifeUrl.substring(0, 80));
-                                }
-                            }
-                        });
+                        processMediaData(data);
                     } catch(e) {}
                 }
             });
             origSend.apply(this, arguments);
         };
 
-        // 2. CHẶN FETCH
         const origFetch = window.fetch;
         window.fetch = async function(...args) {
-            const url = args[0]?.url || args[0] || "";
+            const rawUrl = args[0]?.url || args[0] || "";
+            const u = (typeof rawUrl === 'string' ? rawUrl : rawUrl.toString()).toLowerCase();
             const response = await origFetch.apply(this, args);
-            
-            if (typeof url === 'string' && (url.includes("batchGenerateImages") || url.includes("flowMedia"))) {
+            if (u.includes("image") || u.includes("media") || u.includes("batch") || u.includes("flow")) {
                 const clone = response.clone();
                 clone.text().then(text => {
                     try {
                         let cleaned = text.replace(/^\)\]\}'\n/, '');
                         let data = JSON.parse(cleaned);
-                        let mediaArr = data.media || [];
-                        mediaArr.forEach(item => {
-                            let genImage = item?.image?.generatedImage;
-                            let raw = genImage?.requestData?.promptInputs?.[0]?.textInput || "";
-                            let rawPart = genImage?.requestData?.promptInputs?.[0]?.structuredPrompt?.parts?.[0]?.text || "";
-                            let gen = genImage?.prompt || "";
-                            
-                            let match = (`${raw} | ${rawPart} | ${gen}`).match(/\|\|(.*?)\|\|/);
-                            if (match) {
-                                let stt = (match[1] || "").trim();
-                                let fifeUrl = genImage?.fifeUrl;
-                                if (fifeUrl && stt && !window._completedSTTs.has(stt)) {
-                                    window._completedSTTs.add(stt);
-                                    window._python_results[stt] = fifeUrl;
-                                    console.log("[RADAR IMAGE] 🎯 Tóm được FifeURL ảnh gốc qua Fetch cho STT " + stt + ": " + fifeUrl.substring(0, 80));
-                                }
-                            }
-                        });
+                        processMediaData(data);
                     } catch(e) {}
                 }).catch(e=>{});
             }
             return response;
         };
 
-        // Tự động override phương thức open của XHR để lưu lại URL phục vụ so khớp trong send
         const origOpen = XMLHttpRequest.prototype.open;
         XMLHttpRequest.prototype.open = function(method, url) {
             this._intercept_url = typeof url === 'string' ? url : url.toString();
             origOpen.apply(this, arguments);
         };
-
     })();
     """
-    await page.evaluate(js_interceptor)
+    await page.evaluate(raw_interceptor)
 
 
 # ==========================================
-# 🚀 CORE ENGINE: BATCH SUBMIT & RADAR COLLECT
+# 🚀 CORE ENGINE: BATCH SUBMIT & RADAR IMAGE
 # ==========================================
 
 async def process_image_veo3_batch(page: Page, file_batch: list, output_folder: str, log_callback=print):
-    """
-    Hàm sinh ảnh theo cơ chế Chunking của Flow (Google Labs ImageFX):
-    - Submit 4 prompts liên tiếp bằng nhãn định danh ||STT||.
-    - Quét và tải đồng thời 4 kết quả thông qua Radar JS.
-    - Xác thực Pillow độ phân giải & Aspect Ratio.
-    """
     tasks = {}
     downloaded_urls = set()
 
-    # --- GIAI ĐOẠN 1: SUBMIT HÀNG LOẠT ---
     for item in file_batch:
         stt = str(item.get("STT", "")).strip()
         if not stt: continue
 
-        save_path = item.get("save_path")
-        prompt_text = item.get("prompt", "")
+        save_path = item.get("save_path") or item.get("image_path") or ""
+        prompt_text = item.get("prompt") or item.get("visual_details") or ""
         
         if os.path.exists(save_path):
-            log_callback(f"⏭️ Bỏ qua STT {stt} (Đã có ảnh)")
+            log_callback(f"⏭️ Bỏ qua STT {stt} (Đã có file ảnh output)")
             continue
 
         id_tag = f"||{stt}||"
@@ -270,11 +275,9 @@ async def process_image_veo3_batch(page: Page, file_batch: list, output_folder: 
             "original_item": item
         }
         try:
-            # 1. Định vị Textbox vẽ ảnh (Robust selectors matching VideoFX)
             textbox = page.locator("[role='textbox'], textarea, [contenteditable='true']").first
             await textbox.wait_for(state="visible", timeout=15000)
 
-            # 1.5. Xử lý ảnh tham chiếu (Upload / Dọn dẹp cũ)
             try:
                 remove_btns = page.locator("button:has(i:has-text('close')), button:has(i:has-text('clear')), button[aria-label*='Remove'], button[aria-label*='Clear']").first
                 for _ in range(5):
@@ -288,55 +291,42 @@ async def process_image_veo3_batch(page: Page, file_batch: list, output_folder: 
 
             image_paths = item.get("image_paths", [])
             if image_paths:
-                log_callback(f"☁️ [Veo3] Đang tải lên {len(image_paths)} ảnh tham chiếu cho STT {stt}...")
                 try:
                     file_input = page.locator("input[type='file']").first
                     await file_input.wait_for(state="attached", timeout=10000)
-                    
                     valid_paths = [p for p in image_paths if os.path.exists(p)]
                     if valid_paths:
                         await file_input.set_input_files(valid_paths)
-                        await page.wait_for_timeout(3000) # Đợi ảnh tải lên hiển thị
-                        log_callback(f"✅ [Veo3] Đã upload ảnh tham chiếu thành công cho STT {stt}.")
-                    else:
-                        log_callback(f"⚠️ [Veo3] Không tìm thấy file vật lý cho ảnh tham chiếu: {image_paths}")
+                        await page.wait_for_timeout(3000)
+                        log_callback(f"☁️ [Veo3 Image] Đã upload {len(valid_paths)} ảnh tham chiếu STT {stt}")
                 except Exception as ex:
-                    log_callback(f"❌ [Veo3] Lỗi khi upload ảnh tham chiếu STT {stt}: {ex}")
+                    log_callback(f"❌ [Veo3 Image] Lỗi upload ảnh tham chiếu STT {stt}: {ex}")
 
-            # 2. Gõ Prompt mô phỏng người thật
             full_prompt = f"{id_tag} {prompt_text}"
             await textbox.fill("") 
             await human_type(textbox, full_prompt, page)
             await page.wait_for_timeout(random.uniform(1000, 2000))
             
-            # 3. Bấm Submit (Generate) - Robust icon selectors matching VideoFX
-            btn_gen = page.locator("i:has-text('arrow_forward'), button:has-text('arrow_forward'), button[type='submit']").first
-            await btn_gen.wait_for(state="visible", timeout=15000)
-            
-            await human_click(btn_gen, page)
-            log_callback(f"🚀 [Veo3] Đã gửi yêu cầu vẽ ảnh STT {stt}...")
-            
-            # Nghỉ ngơi ngắn chống spam giữa các lần bấm
-            await page.wait_for_timeout(random.uniform(5000, 6000))
+            # Gửi yêu cầu chuẩn bằng duy nhất phím Enter
+            await textbox.press("Enter")
+            log_callback(f"🚀 [Veo3 Image] Đã gửi STT {stt}")
+            await page.wait_for_timeout(random.uniform(4000, 5000))
             
         except Exception as e:
-            log_callback(f"❌ Lỗi gửi STT {stt}: {e}")
+            log_callback(f"❌ Lỗi gửi Ảnh STT {stt}: {e}")
             tasks.pop(stt, None)
 
     if not tasks:
         return False, file_batch
 
-    # --- GIAI ĐOẠN 2: THU HOẠCH ĐỒNG THỜI QUA RADAR JS ---
-    log_callback(f"⏳ [Veo3] Chờ render {len(tasks)} ảnh qua Radar JS...")
+    log_callback(f"⏳ [Veo3 Image] Chờ render {len(tasks)} ảnh qua Radar JS...")
     start_time = time.time()
     wait_time_limit = config.global_settings["system"]["wait_time"]
     
     while time.time() - start_time < wait_time_limit:
-        # Check for rate limit
         limit_keywords = [
             "reached the limit", "reached your limit", "rate limit", "try again in",
-            "limit of image", "standard limit", "quota exceeded", "out of credits", "too many requests",
-            "đạt giới hạn", "vượt quá giới hạn", "thử lại sau", "đã hết lượt", "giới hạn tạo ảnh"
+            "quota exceeded", "out of credits", "too many requests", "đạt giới hạn", "vượt quá giới hạn"
         ]
         
         has_limit = await page.evaluate("""(keywords) => {
@@ -349,45 +339,38 @@ async def process_image_veo3_batch(page: Page, file_batch: list, output_folder: 
         }""", limit_keywords)
         
         if has_limit:
-            log_callback("⚠️ [Veo3] Phát hiện thông báo giới hạn tạo ảnh (Rate Limit) trên trang Google Labs!", "WARNING")
+            log_callback("⚠️ [Veo3 Image] Phát hiện thông báo giới hạn (Rate Limit) trên Google Labs!", "WARNING")
             from utils.profile_state import RateLimitException
             cooldown_mins = config.global_settings["system"].get("rate_limit_cooldown_minutes", 120)
             raise RateLimitException("Dính giới hạn tạo ảnh trên Google Labs", cooldown_seconds=cooldown_mins * 60)
 
         active_tasks = [uid for uid, info in tasks.items() if not info["done"]]
         if not active_tasks:
-            log_callback("✅ [Veo3] Tất cả ảnh trong chunk này đã tải xong!")
+            log_callback("✅ [Veo3 Image] Tất cả ảnh trong chunk này đã tải xong!")
             break
 
-        # Đọc dữ liệu từ Radar JS trong RAM trình duyệt
         js_results_str = await page.evaluate("JSON.stringify(window._python_results || {})")
         js_results = json.loads(js_results_str)
 
         for uid in active_tasks:
             info = tasks[uid]
-            
             if uid in js_results:
                 image_url = js_results[uid]
-                
-                if image_url in downloaded_urls:
-                    continue
+                if image_url in downloaded_urls: continue
                 
                 os.makedirs(os.path.dirname(info["save_path"]), exist_ok=True)
-                log_callback(f"💾 [Veo3] Phát hiện link ảnh, bắt đầu tải: STT {uid}")
+                log_callback(f"💾 [Veo3 Image] Bắt đầu tải file: STT {uid}")
                 
                 download_success = False
-
-                # Tải ảnh gốc trực tiếp qua Playwright HTTP Request Context (Nhanh, xịn, gốc)
                 try:
-                    response = await page.request.get(image_url, timeout=15000)
+                    response = await page.request.get(image_url, timeout=30000)
                     if response.status == 200:
                         with open(info["save_path"], "wb") as f:
                             f.write(await response.body())
                         download_success = True
                 except Exception as e:
-                    log_callback(f"⚠️ [Veo3] Lỗi tải HTTP ảnh STT {uid}: {e}")
+                    log_callback(f"⚠️ [Veo3 Image] Lỗi tải HTTP STT {uid}: {e}")
 
-                # --- KIỂM TRA CHẤT LƯỢNG ẢNH BẰNG PILLOW ---
                 if download_success:
                     try:
                         is_ok = False
@@ -395,45 +378,86 @@ async def process_image_veo3_batch(page: Page, file_batch: list, output_folder: 
                         with Image.open(info["save_path"]) as img:
                             w, h = img.size
                             if h > 0 and w >= 300 and h >= 300:
-                                # Kiểm định Aspect Ratio
-                                actual_ratio = w / h
-                                system_cfg = config.global_settings.get('system', {})
-                                cfg_ratio_str = system_cfg.get('aspect_ratio', '16:9')
-                                try:
-                                    rw, rh = map(float, cfg_ratio_str.split(':'))
-                                    expected_ratio = rw / rh
-                                except:
-                                    expected_ratio = 16.0 / 9.0
-                                    
-                                lower_bound = expected_ratio * 0.8
-                                upper_bound = expected_ratio * 1.2
-                                
-                                if actual_ratio < lower_bound or actual_ratio > upper_bound:
-                                    reason = f"sai tỉ lệ ({cfg_ratio_str}) thực tế ({w}x{h})"
-                                else:
-                                    is_ok = True
+                                is_ok = True
                             else:
                                 reason = f"kích thước quá nhỏ ({w}x{h})"
                                 
                         if is_ok:
-                            log_callback(f"✅ [Veo3] Thành công STT {uid} ({w}x{h})")
+                            log_callback(f"✅ [Veo3 Image] Tải thành công ảnh STT {uid} ({w}x{h}) -> {info['save_path']}")
                             info["done"] = True
                             downloaded_urls.add(image_url)
                         else:
-                            log_callback(f"⚠️ [Veo3] Ảnh STT {uid} lỗi: {reason}. Tiến hành xóa file.")
+                            log_callback(f"⚠️ [Veo3 Image] Ảnh STT {uid} lỗi: {reason}. Xóa file tải lại...")
                             if os.path.exists(info["save_path"]):
                                 os.remove(info["save_path"])
                     except Exception as ex:
-                        log_callback(f"❌ [Veo3] Lỗi mở file Pillow STT {uid}: {ex}")
+                        log_callback(f"❌ [Veo3 Image] Lỗi mở file Pillow STT {uid}: {ex}")
                         if os.path.exists(info["save_path"]):
                             os.remove(info["save_path"])
-                else:
-                    log_callback(f"❌ [Veo3] Không tải được ảnh cho STT {uid}")
 
         await page.wait_for_timeout(3000)
 
-    # --- TỔNG KẾT BATCH ---
     failed_objects = [v["original_item"] for k, v in tasks.items() if not v["done"]]
     return len(failed_objects) == 0, failed_objects
 
 
+async def handle_prompt_to_image_veo3_async(context, file_batch, assets_path, prefix_prompt, url, log_callback):
+    """
+    Hàm Handler riêng biệt 100% chuyên xử lý TẠO ẢNH bằng Veo3 (Google Flow Image).
+    """
+    page = await context.new_page()
+    await page.add_init_script("Object.defineProperty(navigator, 'webdriver', { get: () => undefined });")
+    
+    try:
+        await page.goto(url, timeout=60000)
+        await page.wait_for_timeout(5000)
+        if 'accounts.google.com' in page.url:
+            log_callback('❌ Profile bị logout -> Dừng.')
+            return (False, file_batch)
+
+        CHUNK_SIZE = 4
+        all_failed_objects = []
+        total_items = len(file_batch)
+        total_chunks = (total_items + CHUNK_SIZE - 1) // CHUNK_SIZE
+
+        log_callback(f"📦 [Veo3 Image] Bắt đầu xử lý {total_items} image task, chia làm {total_chunks} chunk.")
+
+        page = await setup_image_creation_mode_veo3(page, log_callback=log_callback)
+        await inject_radar_js_veo3_image(page)
+        await page.context.add_init_script(STEALTH_SCRIPT)
+
+        for i in range(0, total_items, CHUNK_SIZE):
+            chunk = file_batch[i:i + CHUNK_SIZE]
+            chunk_index = (i // CHUNK_SIZE) + 1
+            log_callback(f"▶️ --- [Veo3 Image] ĐANG CHẠY CHUNK {chunk_index}/{total_chunks} ---")
+
+            is_chunk_ok, failed_in_chunk = await process_image_veo3_batch(page, chunk, assets_path, log_callback)
+            all_failed_objects.extend(failed_in_chunk)
+
+            if len(failed_in_chunk) > 1:
+                log_callback("⚠️ [Veo3 Image] Phát hiện kẹt render! Reload trang...")
+                await page.evaluate("localStorage.removeItem('_grecaptcha'); sessionStorage.clear();")
+                await page.reload(timeout=60000)
+                await page.wait_for_timeout(4000)
+                page = await setup_image_creation_mode_veo3(page, log_callback=log_callback)
+                await inject_radar_js_veo3_image(page)
+                await page.context.add_init_script(STEALTH_SCRIPT)
+
+            if i + CHUNK_SIZE < total_items:
+                cooldown = random.randint(5000, 7000)
+                log_callback(f"💤 Xong Chunk {chunk_index}. Nghỉ giải lao {cooldown//1000}s...")
+                await page.wait_for_timeout(cooldown)
+
+        if len(all_failed_objects) == total_items:
+            log_callback("❌ [Veo3 Image] Toàn bộ ảnh trong lượt này đều thất bại.")
+            return (False, all_failed_objects)
+
+        return (True, all_failed_objects)
+    except Exception as e:
+        if e.__class__.__name__ == "RateLimitException":
+            raise e
+        log_callback(f'❌ Lỗi ở handle_prompt_to_image_veo3_async: {e}')
+        return (False, file_batch)
+    finally:
+        try: await page.close()
+        except: pass
