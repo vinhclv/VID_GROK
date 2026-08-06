@@ -1,16 +1,16 @@
 {
     "system": {
         "max_threads": 1,
-        "loop_limit": 2,
+        "loop_limit": 10,
         "max_retries": 3,
-        "max_stt_retries": 1,
-        "wait_time": 80,
+        "max_stt_retries": 2,
+        "wait_time": 120,
         "aspect_ratio": "9:16",
         "resolution": "480p",
         "browser_type": "ixBrowser (Local API)",
         "ixbrowser_api_url": "http://127.0.0.1:53200",
-        "rate_limit_cooldown_minutes": 1,
-        "max_rate_limit_retries": 2
+        "rate_limit_cooldown_minutes": 10,
+        "max_rate_limit_retries": 10
     },
     "urls": {
         "gemini_url": "https://gemini.google.com",

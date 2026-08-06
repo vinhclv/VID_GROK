@@ -501,6 +501,12 @@ class ImportProjectTab(ttk.Frame):
         card = tk.Frame(self.scroll_frame, bg=bg, pady=5, padx=8)
         card.pack(fill="x")
         card.bind("<MouseWheel>", self._on_mousewheel)
+        # Bind mousewheel cho tất cả widget con để scroll hoạt động khi hover lên text/checkbox
+        def _bind_mousewheel_recursive(widget):
+            widget.bind("<MouseWheel>", self._on_mousewheel)
+            for child in widget.winfo_children():
+                _bind_mousewheel_recursive(child)
+        card.after(10, lambda c=card: _bind_mousewheel_recursive(c))
         card.bind("<Enter>",  lambda e, f=card: f.config(bg=self.ROW_HOVER))
         card.bind("<Leave>",  lambda e, f=card, b=bg: f.config(bg=b))
 
@@ -621,8 +627,14 @@ class ImportProjectTab(ttk.Frame):
         self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
 
     def _select_all(self):
-        for var in self.folder_vars.values():
-            var.set(True)
+        for name, var in self.folder_vars.items():
+            data = self.folder_data.get(name, {})
+            is_ok = data.get("tc_ok", True) and data.get("char_ok", True)
+            pending = data.get("pending", [])
+            completed = data.get("completed", [])
+            is_fully_done = is_ok and len(pending) == 0 and len(completed) > 0
+            if is_ok and not is_fully_done:
+                var.set(True)
         self._update_counter()
 
     def _cancel_all(self):

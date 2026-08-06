@@ -199,18 +199,23 @@ class BatchProcessor:
                     final_pending = []
 
             if final_pending:
-                # Gộp các số liên tiếp thành dải (1,2,3,5 -> '1-3, 5')
-                nums = sorted([int(p.get('STT', 0)) for p in final_pending if str(p.get('STT', '')).isdigit()])
-                ranges, start, end = [], nums[0], nums[0]
-                for n in nums[1:]:
-                    if n == end + 1:
-                        end = n
-                    else:
-                        ranges.append(str(start) if start == end else f"{start}-{end}")
-                        start = end = n
-                ranges.append(str(start) if start == end else f"{start}-{end}")
-                
-                stt_str = ", ".join(ranges)
+                all_stts = [str(p.get('STT', '')) for p in final_pending if p.get('STT') is not None]
+                nums = sorted([int(s) for s in all_stts if s.isdigit()])
+                if nums:
+                    ranges, start, end = [], nums[0], nums[0]
+                    for n in nums[1:]:
+                        if n == end + 1:
+                            end = n
+                        else:
+                            ranges.append(str(start) if start == end else f"{start}-{end}")
+                            start = end = n
+                    ranges.append(str(start) if start == end else f"{start}-{end}")
+                    stt_str = ", ".join(ranges)
+                else:
+                    stt_str = ", ".join(all_stts[:10])
+                    if len(all_stts) > 10:
+                        stt_str += f" (+{len(all_stts)-10} khác)"
+
                 self.log(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", "TECH")
                 self.log(f"  ⚠️  KHOẢNG TRỐNG CẦN XỬ LÝ", "WARNING")
                 self.log(f"  📁  Dự án  : {os.path.basename(os.path.dirname(inp))}", "TECH")

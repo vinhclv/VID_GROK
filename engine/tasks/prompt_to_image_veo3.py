@@ -2,6 +2,7 @@ import os
 import time
 import random
 import json
+import re
 from PIL import Image
 from playwright.async_api import Page, Locator
 import config
@@ -66,20 +67,29 @@ async def setup_image_creation_mode_veo3(page: Page, log_callback=print) -> Page
 
     try:
         if "/project/" not in page.url:
-            create_btn = page.locator("button:has-text('New project')").first
-            if await create_btn.is_visible(timeout=3000):
-                log_callback("➡️ [Veo3 Image] Mở dự án mới trên Dashboard...")
-                await human_click(create_btn, page)
-                await page.wait_for_timeout(2000)
+            create_btn = page.locator(
+                "button:has-text('New project'), a:has-text('New project'), "
+                "button:has-text('Dự án mới'), a:has-text('Dự án mới'), "
+                "button:has-text('Tạo dự án'), a:has-text('Tạo dự án'), "
+                "button:has-text('Create project'), a:has-text('Create project'), "
+                "[aria-label*='New project'], [aria-label*='Dự án mới']"
+            ).first
+            try:
+                if await create_btn.is_visible(timeout=10000):
+                    log_callback("➡️ [Veo3 Image] Mở dự án mới trên Dashboard...")
+                    await human_click(create_btn, page)
+                    await page.wait_for_timeout(3000)
 
-                all_pages = list(page.context.pages)
-                if len(all_pages) > 1:
-                    new_active_page = all_pages[-1]
-                    for p in all_pages:
-                        if p != new_active_page and not p.is_closed():
-                            try: await p.close()
-                            except: pass
-                    page = new_active_page
+                    all_pages = list(page.context.pages)
+                    if len(all_pages) > 1:
+                        new_active_page = all_pages[-1]
+                        for p in all_pages:
+                            if p != new_active_page and not p.is_closed():
+                                try: await p.close()
+                                except: pass
+                        page = new_active_page
+            except Exception:
+                pass
 
         textbox = page.locator("[role='textbox'], textarea, [contenteditable='true']").first
         try:
@@ -261,7 +271,8 @@ async def process_image_veo3_batch(page: Page, file_batch: list, output_folder: 
         if not stt: continue
 
         save_path = item.get("save_path") or item.get("image_path") or ""
-        prompt_text = item.get("prompt") or item.get("visual_details") or ""
+        raw_prompt = item.get("prompt") or item.get("visual_details") or ""
+        prompt_text = re.sub(r"[\r\n]+", " ", str(raw_prompt)).strip()
         
         if os.path.exists(save_path):
             log_callback(f"⏭️ Bỏ qua STT {stt} (Đã có file ảnh output)")

@@ -126,7 +126,8 @@ async def process_prompt_to_image_grok_async(page: Page, item: dict, log_callbac
 
     try:
         stt = item.get("STT")
-        prompt_text = item.get("prompt")
+        raw_prompt = item.get("prompt") or ""
+        prompt_text = re.sub(r"[\r\n]+", " ", str(raw_prompt)).strip()
         save_path = item.get("save_path")
         output_folder = item.get("output_folder")
         image_paths = item.get("image_paths", [])

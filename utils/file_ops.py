@@ -276,6 +276,8 @@ def validate_stretch_videos(json_path, video_in_dir):
             if len(missing_files) > 5:
                 err_msg += f"\n... và {len(missing_files) - 5} file khác."
             return False, err_msg
+
+        return True, ""
     except Exception as e:
         return False, f"Lỗi đọc JSON: {e}"
 

@@ -11,6 +11,7 @@ from ui.profile_tab import ProfileManagerTab
 from ui.dashboard_tab import DashboardTab      
 from ui.settings_tab import SettingsTab       
 from ui.import_tab import ImportProjectTab    
+from ui.format_asset_tab import FormatAssetTab
 from engine.batch_processor import BatchProcessor 
 
 from utils.profile_state import ProfileStateManager
@@ -71,6 +72,10 @@ class BatchApp:
         # TAB 4: Import Project
         self.tab_import = ImportProjectTab(self.notebook, self)
         self.notebook.add(self.tab_import, text="📥 Import Project")
+
+        # TAB 5: Format Asset
+        self.tab_format_asset = FormatAssetTab(self.notebook, self)
+        self.notebook.add(self.tab_format_asset, text="🛠️ Format Asset")
 
         # LOGS
         frame_log = ttk.LabelFrame(main_pane, text="📜 Nhật ký hoạt động", padding=10)

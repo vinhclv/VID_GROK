@@ -42,9 +42,12 @@ import re
 # ==========================================
 
 async def setup_video_creation_mode_veo3(page: Page, log_callback=print) -> Page:
-    target_model = "Omni Flash"
-    duration = "10s"
-    
+    system_cfg = config.global_settings.get('system', {})
+    target_model = system_cfg.get('veo3_model', 'Omni Flash')
+    duration = system_cfg.get('veo3_duration', '10s')
+    aspect_ratio = str(system_cfg.get('aspect_ratio', '16:9')).strip()
+    video_count = 1
+
     try:
         pages = list(page.context.pages)
         for p in pages:
@@ -68,97 +71,146 @@ async def setup_video_creation_mode_veo3(page: Page, log_callback=print) -> Page
     page.on("request", intercept_auth)
 
     try:
-        if "/project/" not in page.url:
-            create_btn = page.locator("button:has-text('New project'), a:has-text('New project')").first
-            if await create_btn.is_visible(timeout=5000):
-                log_callback("➡️ [Veo3 Video] Mở dự án mới trên Dashboard...")
-                await human_click(create_btn, page)
-                await page.wait_for_timeout(3000)
+        # 1. Điều hướng tới Flow nếu chưa mở
+        if "labs.google/fx/tools/flow" not in page.url:
+            log_callback("➡️ [Veo3 Video] Đang điều hướng tới Google Flow...")
+            await page.goto("https://labs.google/fx/tools/flow", wait_until="domcontentloaded", timeout=60000)
+            await page.wait_for_timeout(3000)
 
-                all_pages = list(page.context.pages)
-                if len(all_pages) > 1:
-                    new_active_page = all_pages[-1]
-                    for p in all_pages:
-                        if p != new_active_page and not p.is_closed():
-                            try: await p.close()
-                            except: pass
-                    page = new_active_page
+        # 2. Tạo dự án mới trên Dashboard nếu chưa vào /project/
+        if "/project/" not in page.url:
+            create_btn = page.locator(
+                "button:has-text('New project'), a:has-text('New project'), "
+                "button:has-text('Dự án mới'), a:has-text('Dự án mới'), "
+                "button:has-text('Tạo dự án'), a:has-text('Tạo dự án'), "
+                "button:has-text('Create project'), a:has-text('Create project'), "
+                "[aria-label*='New project'], [aria-label*='Dự án mới']"
+            ).first
+            try:
+                if await create_btn.is_visible(timeout=5000):
+                    log_callback("➡️ [Veo3 Video] Mở dự án mới trên Dashboard...")
+                    await human_click(create_btn, page)
+                    await page.wait_for_timeout(3000)
+
+                    all_pages = list(page.context.pages)
+                    if len(all_pages) > 1:
+                        new_active_page = all_pages[-1]
+                        for p in all_pages:
+                            if p != new_active_page and not p.is_closed():
+                                try: await p.close()
+                                except: pass
+                        page = new_active_page
+            except Exception:
+                pass
 
         textbox = page.locator("textarea, [contenteditable='true']").first
         try:
             await textbox.wait_for(state="visible", timeout=15000)
+            log_callback("✅ [Veo3 Video] Giao diện dự án đã sẵn sàng!")
         except Exception:
             pass
 
+        # 3. Tắt Agent nếu đang bật
         try:
             close_btn = page.locator("button:has-text('Agent'), button[aria-label*='Agent']").first
             if await close_btn.is_visible(timeout=1500):
                 aria_pressed = await close_btn.get_attribute("aria-pressed")
                 if aria_pressed == "true":
                     await human_click(close_btn, page)
+                    log_callback("✅ [Veo3 Video] Đã tắt chế độ Agent.")
                     await page.wait_for_timeout(1000)
         except Exception:
             pass
 
+        # 4. Mở Settings Pill & Cấu hình tuần tự
         settings_pill_btn = page.locator("form button.ldbhld, button.ldbhld, button:has-text('Video -'), button:has-text('Image -'), button:has-text('Video ·'), button:has-text('Image ·')").first
         if await settings_pill_btn.is_visible(timeout=3000):
             await human_click(settings_pill_btn, page)
             await page.wait_for_timeout(1500)
 
-            # A. Tab Video
-            mode_btn = page.locator("button, [role='tab']").filter(has_text=re.compile(r"^Video$", re.I)).first
+            # A. Tab Video via Radix ID
+            mode_btn = page.locator("[id$='trigger-VIDEO']:not([id*='VIDEO_REFERENCES'])").first
             if await mode_btn.is_visible(timeout=2000):
                 await human_click(mode_btn, page)
-                log_callback("⚙️ [Veo3 Video] Tab: Video")
+                log_callback("⚙️ [Veo3 Video] ✅ Tab: Video")
                 await page.wait_for_timeout(600)
+            else:
+                # Fallback text
+                fallback_mode = page.locator("button, [role='tab']").filter(has_text=re.compile(r"^Video$", re.I)).first
+                if await fallback_mode.is_visible(timeout=1000):
+                    await human_click(fallback_mode, page)
+                    log_callback("⚙️ [Veo3 Video] ✅ Tab: Video (Fallback)")
+                    await page.wait_for_timeout(600)
 
-            # B. Model (chọn TRƯỚC Duration để mở khóa thời lượng dài)
-            model_menu_btn = page.locator("button:has-text('Veo'), button:has-text('Omni'), button:has(i:has-text('arrow_drop_down'))").first
+            # B. Aspect Ratio via Radix ID Map (LANDSCAPE = 16:9, PORTRAIT = 9:16)
+            ratio_map = {'16:9': 'LANDSCAPE', '9:16': 'PORTRAIT'}
+            ratio_trigger_id = ratio_map.get(aspect_ratio)
+            ratio_success = False
+            if ratio_trigger_id:
+                ratio_btn = page.locator(f"[id*='trigger-{ratio_trigger_id}']").first
+                try:
+                    if await ratio_btn.is_visible(timeout=2000):
+                        await human_click(ratio_btn, page)
+                        log_callback(f"⚙️ [Veo3 Video] ✅ Tỉ lệ: {aspect_ratio}")
+                        await page.wait_for_timeout(600)
+                        ratio_success = True
+                except Exception:
+                    pass
+
+            if not ratio_success:
+                fallback_ratio = page.locator("button, [role='tab']").filter(has_text=re.compile(rf"^{re.escape(aspect_ratio)}$", re.I)).first
+                try:
+                    if await fallback_ratio.is_visible(timeout=1500):
+                        await human_click(fallback_ratio, page)
+                        log_callback(f"⚙️ [Veo3 Video] ✅ Tỉ lệ: {aspect_ratio} (Fallback)")
+                        await page.wait_for_timeout(600)
+                except Exception:
+                    pass
+
+            # C. Model Dropdown
+            model_dropdown_btn = page.locator("xpath=/html/body/div[3]/div/button").first
+            if not await model_dropdown_btn.is_visible(timeout=1500):
+                model_dropdown_btn = page.locator("button:has-text('Veo'), button:has-text('Omni'), button:has(i:has-text('arrow_drop_down'))").first
+
             try:
-                if await model_menu_btn.is_visible(timeout=2000):
-                    await human_click(model_menu_btn, page)
+                if await model_dropdown_btn.is_visible(timeout=2000):
+                    await human_click(model_dropdown_btn, page)
                     await page.wait_for_timeout(800)
 
-                    omni_option = page.locator("button, div[role='option'], span").filter(has_text=re.compile(re.escape(target_model), re.I)).first
-                    if not await omni_option.is_visible(timeout=2000):
-                        omni_option = page.locator("xpath=/html/body/div[4]/div/div[1]/div/button").first
+                    model_opt = page.locator("div[role='menuitem'] span").filter(has_text=re.compile(re.escape(target_model), re.I)).first
+                    if not await model_opt.is_visible(timeout=1500):
+                        model_opt = page.locator("div[role='menuitem'] button").filter(has_text=re.compile(re.escape(target_model), re.I)).first
+                    if not await model_opt.is_visible(timeout=1500):
+                        model_opt = page.locator("xpath=/html/body/div[4]/div/div[1]/div/button").first
 
-                    if await omni_option.is_visible(timeout=3000):
-                        await human_click(omni_option, page, force=True)
-                        log_callback(f"⚙️ [Veo3 Video] Model UI: {target_model}")
+                    if await model_opt.is_visible(timeout=2000):
+                        await human_click(model_opt, page, force=True)
+                        log_callback(f"⚙️ [Veo3 Video] ✅ Model UI: {target_model}")
                         await page.wait_for_timeout(600)
+                    else:
+                        await page.keyboard.press("Escape")
+                        await page.wait_for_timeout(300)
             except Exception:
                 pass
 
-            # C. Duration (chọn SAU model)
-            dur_btn = page.locator("button, [role='tab']").filter(has_text=re.compile(rf"^{re.escape(duration)}$", re.I)).first
+            # D. Duration
+            dur_btn = page.locator("button.flow_tab_slider_trigger, button, [role='tab']").filter(has_text=re.compile(rf"^{re.escape(duration)}$", re.I)).first
             try:
                 if await dur_btn.is_visible(timeout=2000):
                     await human_click(dur_btn, page)
-                    log_callback(f"⚙️ [Veo3 Video] Thời lượng: {duration}")
+                    log_callback(f"⚙️ [Veo3 Video] ✅ Thời lượng: {duration}")
                     await page.wait_for_timeout(600)
             except Exception:
                 pass
 
-            # D. Aspect Ratio
-            system_cfg = config.global_settings.get('system', {})
-            aspect_ratio = str(system_cfg.get('aspect_ratio', '16:9')).strip()
-
-            ratio_btn = page.locator("button, [role='tab']").filter(has_text=re.compile(rf"^{re.escape(aspect_ratio)}$", re.I)).first
-            try:
-                if await ratio_btn.is_visible(timeout=2000):
-                    await human_click(ratio_btn, page)
-                    log_callback(f"⚙️ [Veo3 Video] Tỉ lệ: {aspect_ratio}")
-                    await page.wait_for_timeout(600)
-            except Exception:
-                pass
-
-            # E. Số lượng x1
-            qty_btn = page.locator("button, [role='tab']").filter(has_text=re.compile(r"^x1$", re.I)).first
+            # E. Quantity x1 (Focus + Enter)
+            target_qty_text = f"x{video_count}"
+            qty_btn = page.locator("button.flow_tab_slider_trigger, button, [role='tab']").filter(has_text=re.compile(rf"^{re.escape(target_qty_text)}$", re.I)).first
             try:
                 if await qty_btn.is_visible(timeout=2000):
-                    await human_click(qty_btn, page, force=True)
-                    log_callback("⚙️ [Veo3 Video] Số lượng: x1")
+                    await qty_btn.focus()
+                    await page.keyboard.press("Enter")
+                    log_callback(f"⚙️ [Veo3 Video] ✅ Số lượng: {target_qty_text}")
                     await page.wait_for_timeout(600)
             except Exception:
                 pass
@@ -416,7 +468,8 @@ async def process_video_veo3_batch(page: Page, file_batch: list, output_folder: 
         if not stt: continue
 
         save_path = item.get("save_path") or item.get("video_path") or ""
-        prompt_text = item.get("prompt") or item.get("visual_details") or ""
+        raw_prompt = item.get("prompt") or item.get("visual_details") or ""
+        prompt_text = re.sub(r"[\r\n]+", " ", str(raw_prompt)).strip()
         
         if os.path.exists(save_path):
             log_callback(f"⏭️ Bỏ qua STT {stt} (Đã có file video output)")
@@ -469,46 +522,22 @@ async def process_video_veo3_batch(page: Page, file_batch: list, output_folder: 
             await human_type(textbox, full_prompt, page)
             await page.wait_for_timeout(random.uniform(1000, 2000))
 
-            if uploaded_image_ids:
-                # Image-to-Video: Intercept request để inject referenceImages
-                _uploaded_ids = uploaded_image_ids.copy()
-
-                async def route_handler(route):
-                    try:
-                        request = route.request
-                        post_data = request.post_data
-                        body = json.loads(post_data)
-
-                        if "requests" in body:
-                            for req in body["requests"]:
-                                req["seed"] = random.randint(10000, 99999)
-                                req["metadata"] = {}
-                                req["referenceImages"] = [
-                                    {"mediaId": mid, "imageUsageType": "IMAGE_USAGE_TYPE_ASSET"}
-                                    for mid in _uploaded_ids
-                                ]
-
-                        new_url = request.url.replace(
-                            "batchAsyncGenerateVideoText",
-                            "batchAsyncGenerateVideoReferenceImages"
-                        )
-
-                        log_callback(f"🔀 [Veo3 Video] Intercepted! Inject {len(_uploaded_ids)} ảnh → ReferenceImages endpoint")
-                        await route.continue_(url=new_url, post_data=json.dumps(body))
-                    except Exception as e:
-                        log_callback(f"⚠️ [Veo3 Video] Intercept error: {e}")
-                        await route.continue_()
-
-                await page.route("**/video:batchAsyncGenerateVideoText", route_handler)
-                await textbox.press("Enter")
-                log_callback(f"🚀 [Veo3 Video] Đã gửi STT {stt} (kèm {len(uploaded_image_ids)} ảnh tham chiếu)")
-                await page.wait_for_timeout(random.uniform(4000, 5000))
-                await page.unroute("**/video:batchAsyncGenerateVideoText")
-            else:
-                # Text-to-Video: Gửi bằng Enter
+            # Gửi qua UI: Click nút Submit Arrow
+            submit_btn = page.locator("form button[type='submit'], button:has(i:has-text('arrow_forward')), form button:has(svg), button[aria-label*='Send'], button[aria-label*='Submit'], button[aria-label*='Generate']").last
+            try:
+                if await submit_btn.is_visible(timeout=2000):
+                    await human_click(submit_btn, page)
+                    img_note = f" (kèm {len(uploaded_image_ids)} ảnh tham chiếu)" if uploaded_image_ids else ""
+                    log_callback(f"🚀 [Veo3 Video] Đã bấm Nút Gửi STT {stt}{img_note}")
+                else:
+                    await page.keyboard.press("Control+Enter")
+                    await page.wait_for_timeout(500)
+                    await textbox.press("Enter")
+                    log_callback(f"🚀 [Veo3 Video] Đã gửi STT {stt} qua phím Enter")
+            except Exception:
                 await textbox.press("Enter")
                 log_callback(f"🚀 [Veo3 Video] Đã gửi STT {stt}")
-                await page.wait_for_timeout(random.uniform(4000, 5000))
+            await page.wait_for_timeout(random.uniform(3000, 5000))
             
         except Exception as e:
             log_callback(f"❌ Lỗi gửi Video STT {stt}: {e}")
