@@ -12,7 +12,8 @@ from utils.file_ops import (
     get_prompt_image_status,
     get_1_image_prompt_video_status,
     get_stretch_video_status,
-    get_image_to_video_status
+    get_image_to_video_status,
+    get_task_status
 )
 from engine.worker import run_worker_task
 import config
@@ -103,19 +104,7 @@ class BatchProcessor:
         self.log(f"🔍 Bắt đầu xử lý: {os.path.basename(inp)}", "INFO")
 
         while not self.stop_event.is_set():
-            match loop_type:
-                case "srt_prompt":
-                    pending, _ = get_srt_prompt_status(inp, out)
-                case "prompt_image":
-                    pending, _ = get_prompt_image_status(inp, inp2, out)
-                case "1_image_prompt_video":
-                    pending, _ = get_1_image_prompt_video_status(inp, inp2, out)
-                case "stretch_video":
-                    pending, _ = get_stretch_video_status(inp, inp2, out)
-                case "image_to_video":
-                    pending, _ = get_image_to_video_status(inp, inp2, out)
-                case _:
-                    pending, _ = [], []
+            pending, _ = get_task_status(loop_type, inp, inp2, out)
 
             if not pending:
                 self.log(f"✅ Dự án {os.path.basename(inp)} hoàn thành!", "SUCCESS")
@@ -184,19 +173,7 @@ class BatchProcessor:
         
         # Sau khi kết thúc, kiểm tra xem còn STT nào thiếu không và log ra
         try:
-            match loop_type:
-                case "srt_prompt":
-                    final_pending, _ = get_srt_prompt_status(inp, out)
-                case "prompt_image":
-                    final_pending, _ = get_prompt_image_status(inp, inp2, out)
-                case "1_image_prompt_video":
-                    final_pending, _ = get_1_image_prompt_video_status(inp, inp2, out)
-                case "stretch_video":
-                    final_pending, _ = get_stretch_video_status(inp, inp2, out)
-                case "image_to_video":
-                    final_pending, _ = get_image_to_video_status(inp, inp2, out)
-                case _:
-                    final_pending = []
+            final_pending, _ = get_task_status(loop_type, inp, inp2, out)
 
             if final_pending:
                 all_stts = [str(p.get('STT', '')) for p in final_pending if p.get('STT') is not None]
@@ -266,29 +243,12 @@ class BatchProcessor:
                     
                     if not candidates: return
 
-                    match loop_type:
-                        case "srt_prompt":
-                            actual_pending, _ = get_srt_prompt_status(inp_path, out_path)
-                            batch = actual_pending # Ném cả file vào luôn vì srt rất nhỏ
-                        case "prompt_image":
-                            actual_pending, _ = get_prompt_image_status(inp_path, inp2_path, out_path)
-                            ap_stts = [i.get("STT") for i in actual_pending]
-                            batch = [item for item in candidates if isinstance(item, dict) and item.get("STT") in ap_stts]
-                        case "1_image_prompt_video":
-                            actual_pending, _ = get_1_image_prompt_video_status(inp_path, inp2_path, out_path)
-                            ap_stts = [i.get("STT") for i in actual_pending]
-                            batch = [item for item in candidates if isinstance(item, dict) and item.get("STT") in ap_stts]
-                        case "stretch_video":
-                            actual_pending, _ = get_stretch_video_status(inp_path, inp2_path, out_path)
-                            ap_stts = [i.get("STT") for i in actual_pending]
-                            batch = [item for item in candidates if isinstance(item, dict) and item.get("STT") in ap_stts]
-                        case "image_to_video":
-                            actual_pending, _ = get_image_to_video_status(inp_path, inp2_path, out_path)
-                            ap_stts = [i.get("STT") for i in actual_pending]
-                            batch = [item for item in candidates if isinstance(item, dict) and item.get("STT") in ap_stts]
-                        case _:
-                            actual_pending, _ = [], []
-                            batch = []
+                    actual_pending, _ = get_task_status(loop_type, inp_path, inp2_path, out_path)
+                    if loop_type in ["srt_prompt", "srt_shuffle"]:
+                        batch = actual_pending
+                    else:
+                        ap_stts = [i.get("STT") for i in actual_pending]
+                        batch = [item for item in candidates if isinstance(item, dict) and item.get("STT") in ap_stts]
                     
                 if not batch: continue
 
@@ -352,19 +312,7 @@ class BatchProcessor:
                 try:
                     inp, inp2, out, loop_type, languages, shuffle_gems = last_info
                     
-                    match loop_type:
-                        case "srt_prompt":
-                            pending, completed = get_srt_prompt_status(inp, out)
-                        case "prompt_image":
-                            pending, completed = get_prompt_image_status(inp, inp2, out)
-                        case "1_image_prompt_video":
-                            pending, completed = get_1_image_prompt_video_status(inp, inp2, out)
-                        case "stretch_video":
-                            pending, completed = get_stretch_video_status(inp, inp2, out)
-                        case "image_to_video":
-                            pending, completed = get_image_to_video_status(inp, inp2, out)
-                        case _:
-                            pending, completed = [], []
+                    pending, completed = get_task_status(loop_type, inp, inp2, out)
 
                     t = len(pending) + len(completed)
                     update_ui_callback(t, len(pending), len(completed))
@@ -378,19 +326,7 @@ class BatchProcessor:
         if last_info:
             try:
                 inp, inp2, out, loop_type, languages, shuffle_gems = last_info
-                match loop_type:
-                    case "srt_prompt":
-                        pending, completed = get_srt_prompt_status(inp, out)
-                    case "prompt_image":
-                        pending, completed = get_prompt_image_status(inp, inp2, out)
-                    case "1_image_prompt_video":
-                        pending, completed = get_1_image_prompt_video_status(inp, inp2, out)
-                    case "stretch_video":
-                        pending, completed = get_stretch_video_status(inp, inp2, out)
-                    case "image_to_video":
-                        pending, completed = get_image_to_video_status(inp, inp2, out)
-                    case _:
-                        pending, completed = [], []
+                pending, completed = get_task_status(loop_type, inp, inp2, out)
                 t = len(pending) + len(completed)
                 update_ui_callback(t, len(pending), len(completed))
             except Exception as e:

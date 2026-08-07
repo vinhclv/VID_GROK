@@ -3,39 +3,11 @@ import time
 import random
 import json
 import base64
+import re
 from playwright.async_api import Page, Locator
 import config
 from flow_captcha_solver.stealth import STEALTH_SCRIPT
-
-# ==========================================
-# 🤖 HỆ THỐNG MÔ PHỎNG HÀNH VI NGƯỜI THẬT
-# ==========================================
-
-async def human_click(locator: Locator, page: Page, force: bool = False):
-    try:
-        await locator.scroll_into_view_if_needed(timeout=5000)
-        await locator.hover(timeout=5000)
-        await page.wait_for_timeout(random.uniform(100, 300))
-        await locator.click(delay=random.randint(50, 150), force=force)
-    except Exception:
-        await locator.click(delay=random.randint(50, 150), force=True)
-
-async def human_type(locator: Locator, text: str, page: Page):
-    await human_click(locator, page)
-    await page.wait_for_timeout(random.uniform(200, 400))
-    idx = 0
-    while idx < len(text):
-        chunk_size = random.randint(15, 30)
-        chunk = text[idx:idx+chunk_size]
-        await locator.press_sequentially(chunk, delay=random.randint(5, 10))
-        idx += chunk_size
-        await page.wait_for_timeout(random.uniform(20, 50))
-        if random.random() < 0.05:
-            await page.wait_for_timeout(random.uniform(100, 200))
-    await page.wait_for_timeout(random.uniform(200, 400))
-
-
-import re
+from engine.tasks.helpers import human_click, human_type
 
 # ==========================================
 # ⚙️ CẤU HÌNH GIAO DIỆN VEO3 VIDEO
@@ -497,25 +469,43 @@ async def process_video_veo3_batch(page: Page, file_batch: list, output_folder: 
             except Exception:
                 pass
 
-            # Upload ảnh tham chiếu qua Pure API
+            # Upload ảnh tham chiếu qua UI input[type='file'] và bắt chính xác Network Response 200 OK từ Google
             image_paths = item.get("image_paths", [])
-            uploaded_image_ids = []
+            valid_image_count = 0
 
             if image_paths:
-                valid_paths = [p for p in image_paths if os.path.exists(p)]
-                if valid_paths:
-                    proj_match = re.search(r'/project/([a-f0-9\-]+)', page.url)
-                    project_id = proj_match.group(1) if proj_match else ""
+                try:
+                    file_input = page.locator("input[type='file']").first
+                    await file_input.wait_for(state="attached", timeout=10000)
+                    valid_paths = [p for p in image_paths if os.path.exists(p)]
+                    if valid_paths:
+                        log_callback(f"☁️ [Veo3 Video] Đang nạp {len(valid_paths)} ảnh tham chiếu STT {stt}, chờ Google xử lý...")
+                        
+                        upload_responses = []
+                        def handle_upload_res(res):
+                            if ("uploadImage" in res.url or "upload" in res.url) and res.status == 200:
+                                upload_responses.append(res)
 
-                    for img_path in valid_paths:
-                        media_id = await upload_pure_api_image(page, img_path, project_id, log_callback)
-                        if media_id:
-                            uploaded_image_ids.append(media_id)
-
-                    if uploaded_image_ids:
-                        log_callback(f"☁️ [Veo3 Video] Đã upload {len(uploaded_image_ids)} ảnh tham chiếu STT {stt} (Pure API)")
-                    else:
-                        log_callback(f"⚠️ [Veo3 Video] Không upload được ảnh tham chiếu STT {stt}")
+                        page.on("response", handle_upload_res)
+                        try:
+                            await file_input.set_input_files(valid_paths)
+                            
+                            # Vòng lặp chờ đếm đủ số response 200 OK từ Google (Tối đa 35s)
+                            start_wait = time.time()
+                            while len(upload_responses) < len(valid_paths) and time.time() - start_wait < 35:
+                                await page.wait_for_timeout(500)
+                                
+                            await page.wait_for_timeout(2000)  # Đợi 2s để React commit mediaId vào Form State
+                            valid_image_count = len(upload_responses)
+                            if valid_image_count > 0:
+                                log_callback(f"✅ [Veo3 Video] Đã hoàn tất upload {valid_image_count}/{len(valid_paths)} ảnh tham chiếu lên Google Flow!")
+                            else:
+                                log_callback(f"⚠️ [Veo3 Video] Không nhận được phản hồi upload ảnh từ Server Google (Timeout).")
+                        finally:
+                            try: page.remove_listener("response", handle_upload_res)
+                            except: pass
+                except Exception as ex:
+                    log_callback(f"❌ [Veo3 Video] Lỗi nạp ảnh tham chiếu STT {stt} lên UI: {ex}")
 
             full_prompt = f"{id_tag} {prompt_text}"
             await textbox.fill("") 
@@ -526,8 +516,21 @@ async def process_video_veo3_batch(page: Page, file_batch: list, output_folder: 
             submit_btn = page.locator("form button[type='submit'], button:has(i:has-text('arrow_forward')), form button:has(svg), button[aria-label*='Send'], button[aria-label*='Submit'], button[aria-label*='Generate']").last
             try:
                 if await submit_btn.is_visible(timeout=2000):
+                    # Chờ nút Submit sáng lên hẳn (nếu ảnh còn đang xử lý ngầm, nút sẽ bị disabled)
+                    submit_ready = False
+                    for _ in range(20):
+                        if await submit_btn.is_enabled():
+                            submit_ready = True
+                            break
+                        await page.wait_for_timeout(1000)
+
+                    if not submit_ready:
+                        log_callback(f"⚠️ [Veo3 Video] Nút Gửi bị khóa quá 20s (STT {stt}) do ảnh chưa xử lý xong.")
+                        tasks.pop(stt, None)
+                        continue
+
                     await human_click(submit_btn, page)
-                    img_note = f" (kèm {len(uploaded_image_ids)} ảnh tham chiếu)" if uploaded_image_ids else ""
+                    img_note = f" (kèm {valid_image_count} ảnh tham chiếu)" if valid_image_count else ""
                     log_callback(f"🚀 [Veo3 Video] Đã bấm Nút Gửi STT {stt}{img_note}")
                 else:
                     await page.keyboard.press("Control+Enter")

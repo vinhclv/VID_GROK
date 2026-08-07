@@ -19,7 +19,7 @@ DEFAULT_CONFIG_DATA = {
         "loop_limit": 5,
         "max_retries": 30,
         "max_stt_retries": 5,
-        "wait_time": 30,
+        "wait_time": 300,
         "aspect_ratio": "16:9",
         "resolution": "720p",
         "browser_type": "ixBrowser",
@@ -78,6 +78,8 @@ def load_config():
                 current_config["projects"] = saved_data["projects"]
             if "gems" in saved_data:
                 current_config["gems"] = saved_data["gems"]
+            if "standardize" in saved_data:
+                current_config["standardize"].update(saved_data["standardize"])
                 
         except Exception as e:
             print(f"⚠️ Lỗi đọc file config (Dùng mặc định): {e}")

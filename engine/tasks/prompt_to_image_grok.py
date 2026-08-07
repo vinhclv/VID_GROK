@@ -7,7 +7,9 @@ import base64
 from PIL import Image
 from playwright.async_api import Page
 import config
-from engine.tasks.prompt_to_video import human_click, human_type, paste_images_to_chat
+from engine.tasks.helpers import human_click, human_type
+from engine.tasks.prompt_to_video import paste_images_to_chat
+
 
 async def setup_image_format_ui(page: Page):
     """

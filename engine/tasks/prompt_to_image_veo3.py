@@ -7,33 +7,7 @@ from PIL import Image
 from playwright.async_api import Page, Locator
 import config
 from flow_captcha_solver.stealth import STEALTH_SCRIPT
-
-# ==========================================
-# 🤖 HỆ THỐNG MÔ PHỎNG HÀNH VI NGƯỜI THẬT
-# ==========================================
-
-async def human_click(locator: Locator, page: Page, force: bool = False):
-    try:
-        await locator.scroll_into_view_if_needed(timeout=5000)
-        await locator.hover(timeout=5000)
-        await page.wait_for_timeout(random.uniform(100, 300))
-        await locator.click(delay=random.randint(50, 150), force=force)
-    except Exception:
-        await locator.click(delay=random.randint(50, 150), force=True)
-
-async def human_type(locator: Locator, text: str, page: Page):
-    await human_click(locator, page)
-    await page.wait_for_timeout(random.uniform(200, 400))
-    idx = 0
-    while idx < len(text):
-        chunk_size = random.randint(15, 30)
-        chunk = text[idx:idx+chunk_size]
-        await locator.press_sequentially(chunk, delay=random.randint(5, 10))
-        idx += chunk_size
-        await page.wait_for_timeout(random.uniform(20, 50))
-        if random.random() < 0.05:
-            await page.wait_for_timeout(random.uniform(100, 200))
-    await page.wait_for_timeout(random.uniform(200, 400))
+from engine.tasks.helpers import human_click, human_type
 
 
 # ==========================================
@@ -307,9 +281,27 @@ async def process_image_veo3_batch(page: Page, file_batch: list, output_folder: 
                     await file_input.wait_for(state="attached", timeout=10000)
                     valid_paths = [p for p in image_paths if os.path.exists(p)]
                     if valid_paths:
-                        await file_input.set_input_files(valid_paths)
-                        await page.wait_for_timeout(3000)
-                        log_callback(f"☁️ [Veo3 Image] Đã upload {len(valid_paths)} ảnh tham chiếu STT {stt}")
+                        log_callback(f"☁️ [Veo3 Image] Đang nạp {len(valid_paths)} ảnh tham chiếu STT {stt}, chờ Google xử lý...")
+                        
+                        upload_responses = []
+                        def handle_upload_res(res):
+                            if ("uploadImage" in res.url or "upload" in res.url) and res.status == 200:
+                                upload_responses.append(res)
+
+                        page.on("response", handle_upload_res)
+                        try:
+                            await file_input.set_input_files(valid_paths)
+                            
+                            # Vòng lặp chờ đếm đủ số response 200 OK từ Google (Tối đa 35s)
+                            start_wait = time.time()
+                            while len(upload_responses) < len(valid_paths) and time.time() - start_wait < 35:
+                                await page.wait_for_timeout(500)
+                                
+                            await page.wait_for_timeout(2000)  # Đợi 2s để React commit mediaId vào Form State
+                            log_callback(f"✅ [Veo3 Image] Đã hoàn tất upload {len(upload_responses)}/{len(valid_paths)} ảnh tham chiếu lên Google Flow!")
+                        finally:
+                            try: page.remove_listener("response", handle_upload_res)
+                            except: pass
                 except Exception as ex:
                     log_callback(f"❌ [Veo3 Image] Lỗi upload ảnh tham chiếu STT {stt}: {ex}")
 

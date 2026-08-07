@@ -389,3 +389,23 @@ def validate_image_to_video(json_path, img_dir):
     except Exception as e:
         return False, f"Lỗi đọc JSON: {e}"
 
+
+def get_task_status(loop_type, inp, inp2, out):
+    """
+    Hàm tổng hợp lấy danh sách task (pending, completed) theo loop_type.
+    """
+    match loop_type:
+        case "srt_prompt":
+            return get_srt_prompt_status(inp, out)
+        case "prompt_image":
+            return get_prompt_image_status(inp, inp2, out)
+        case "1_image_prompt_video":
+            return get_1_image_prompt_video_status(inp, inp2, out)
+        case "stretch_video":
+            return get_stretch_video_status(inp, inp2, out)
+        case "image_to_video":
+            return get_image_to_video_status(inp, inp2, out)
+        case _:
+            return [], []
+
+
