@@ -5,7 +5,7 @@
         "max_retries": 3,
         "max_stt_retries": 2,
         "wait_time": 120,
-        "aspect_ratio": "9:16",
+        "aspect_ratio": "16:9",
         "resolution": "480p",
         "browser_type": "ixBrowser (Local API)",
         "ixbrowser_api_url": "http://127.0.0.1:53200",
@@ -31,6 +31,11 @@
         {
             "name": "veo3",
             "url": "https://labs.google/fx/tools/flow",
+            "description": "Mô tả..."
+        },
+        {
+            "name": "metadata",
+            "url": "https://gemini.google.com/gem/10I6IGLfIAtLe-xe3AHjH91n4ti6eRppb?usp=sharing",
             "description": "Mô tả..."
         }
     ],

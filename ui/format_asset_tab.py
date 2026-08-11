@@ -104,15 +104,15 @@ class FormatAssetTab(ttk.Frame):
         """Tạo 2 card cho 2 pha."""
         phases = [
             {
-                "title": "PHA 1 — Split & Build tham chiếu",
-                "desc":  "Tách Script_raw → thư mục thành phần → Gộp character → tong_hop_character/",
+                "title": "PHA 1 — Split & Build tham chiếu & Thumbnail",
+                "desc":  "Tách Script_raw → thư mục thành phần → Gộp character & Gộp thumbnail → tong_hop_character/ & tong_hop_thumbnail/",
                 "btn":   "▶ SPLIT & BUILD",
                 "cmd":   self._run_phase1,
                 "color": "#2ac3de",
             },
             {
                 "title": "PHA 2 — Phân phối ảnh & Deploy → 0001_input",
-                "desc":  "Copy ảnh từ output_image/ → character/ & Đóng gói Storyboard JSON + Tài nguyên phụ vào 0001_input/{ID}/",
+                "desc":  "Phân phối ảnh Nhân vật (character/) & Thumbnail ({ID}_thumb.jpg) + Đóng gói Storyboard JSON vào 0001_input/{ID}/",
                 "btn":   "▶ PHÂN PHỐI & DEPLOY",
                 "cmd":   self._run_phase2,
                 "color": "#7aa2f7",
@@ -195,7 +195,8 @@ class FormatAssetTab(ttk.Frame):
         if info["script_ids"]:
             lines.append(f"📌 IDs: {', '.join(info['script_ids'][:20])}")
         lines.append(f"🖼️ tong_hop_character: {'✅ Có' if info['has_tong_hop'] else '❌ Chưa có'}")
-        lines.append(f"🎨 Ảnh tham chiếu: {info['ref_image_count']} file")
+        lines.append(f"🎨 tong_hop_thumbnail: {'✅ Có' if info.get('has_tong_hop_thumb') else '❌ Chưa có'}")
+        lines.append(f"🖼️ Ảnh tham chiếu: {info['ref_image_count']} file")
         lines.append(f"📦 0001_input: {len(info['input_ids'])} dự án")
 
         self.lbl_info.config(text=" │ ".join(lines), foreground="#ccc")

@@ -7,7 +7,8 @@ from engine.tasks.handler import (
     handle_1_image_prompt_video_async,
     handle_srt_to_prompt_async,
     handle_prompt_to_image_grok_async,
-    handle_prompt_to_image_veo3_async
+    handle_prompt_to_image_veo3_async,
+    handle_script_to_metadata_async
 )
 
 def run_worker_task(profile_folder, batch, task_type, assets_path, prompt, url, profiles_dir, stop_event, log_callback):
@@ -34,7 +35,7 @@ def run_worker_task(profile_folder, batch, task_type, assets_path, prompt, url, 
         return is_healthy, failed_items
 
     # --- NẾU LÀ CÁC TÁC VỤ DUYỆT WEB: CHẠY PLAYWRIGHT VÀ RETURN LUÔN ---
-    if task_type in ["1_image_prompt_video", "srt_prompt", "prompt_image"]:
+    if task_type in ["1_image_prompt_video", "srt_prompt", "prompt_image", "script_metadata"]:
         is_healthy, failed_items = run_playwright_batch_sync(
             p_path, batch, assets_path, prompt, url, task_log, task_type
         )
@@ -63,6 +64,10 @@ async def playwright_lifecycle_manager(profile_path, file_batch, assets_path, pr
             )
         elif task_type == "srt_prompt":
             is_healthy, failed_items = await handle_srt_to_prompt_async(
+                context, file_batch, assets_path, prefix_prompt, url, log_callback
+            )
+        elif task_type == "script_metadata":
+            is_healthy, failed_items = await handle_script_to_metadata_async(
                 context, file_batch, assets_path, prefix_prompt, url, log_callback
             )
         elif task_type == "prompt_image":

@@ -390,6 +390,36 @@ def validate_image_to_video(json_path, img_dir):
         return False, f"Lỗi đọc JSON: {e}"
 
 
+def get_script_metadata_status(inp, out):
+    """
+    Hàm tính trạng thái (pending, completed) cho task ScriptRaw ➡ Metadata.
+    inp: Đường dẫn file Script_raw/*.txt
+    out: Đường dẫn thư mục dự án 0001_input/{ID}/
+    """
+    import re
+    pending, completed = [], []
+    vid_id = "0000"
+    m = re.search(r"(\d{4})", os.path.basename(inp))
+    if m: vid_id = m.group(1)
+
+    item = {
+        "STT": vid_id,
+        "vid_id": vid_id,
+        "script_path": inp,
+        "inp": inp,
+        "output_dir": out,
+        "out": out
+    }
+
+    meta_file = os.path.join(out, "metadata.json")
+    if os.path.exists(meta_file) and os.path.getsize(meta_file) > 0:
+        completed.append(item)
+    else:
+        pending.append(item)
+
+    return pending, completed
+
+
 def get_task_status(loop_type, inp, inp2, out):
     """
     Hàm tổng hợp lấy danh sách task (pending, completed) theo loop_type.
@@ -397,6 +427,8 @@ def get_task_status(loop_type, inp, inp2, out):
     match loop_type:
         case "srt_prompt":
             return get_srt_prompt_status(inp, out)
+        case "script_metadata":
+            return get_script_metadata_status(inp, out)
         case "prompt_image":
             return get_prompt_image_status(inp, inp2, out)
         case "1_image_prompt_video":

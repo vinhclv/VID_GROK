@@ -188,3 +188,55 @@ async def handle_prompt_to_image_veo3_async(context, file_batch, assets_path, pr
     """
     from engine.tasks.prompt_to_image_veo3 import handle_prompt_to_image_veo3_async as _handle_image
     return await _handle_image(context, file_batch, assets_path, prefix_prompt, url, log_callback)
+
+
+async def handle_script_to_metadata_async(context, file_batch, assets_path, prefix_prompt, url, log_callback):
+    """
+    Xử lý kịch bản Script_raw/*.txt sang metadata.json và {ID}_thumb.json qua Gemini AI.
+    """
+    from engine.tasks.script_to_metadata import process_script_to_metadata_async
+    page = await context.new_page()
+    await page.add_init_script("\n        Object.defineProperty(navigator, 'webdriver', {\n            get: () => undefined\n        });\n    ")
+    try:
+        await page.goto(url, timeout=60000)
+        await page.wait_for_timeout(5000)
+        if 'accounts.google.com' in page.url:
+            log_callback('❌ Profile bị logout -> Dừng.')
+            return (False, file_batch)
+
+        failed_total = list(file_batch)
+        consecutive_errors = 0
+        MAX_CONSECUTIVE_ERRORS = 3
+
+        for item in file_batch:
+            vid_id = item.get('vid_id') or item.get('STT') or '0000'
+            log_callback(f'📑 [Script ➡ Metadata] Đang tạo Metadata cho {vid_id}...')
+            success = await process_script_to_metadata_async(page, item, log_callback)
+            if success:
+                if item in failed_total:
+                    failed_total.remove(item)
+                consecutive_errors = 0
+            else:
+                consecutive_errors += 1
+                log_callback(f'⚠️ Lỗi xử lý Metadata STT {vid_id} ({consecutive_errors}/{MAX_CONSECUTIVE_ERRORS})')
+                if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
+                    log_callback('💀 Profile lỗi liên tiếp -> Dừng.')
+                    return (False, failed_total)
+                if page.is_closed():
+                    log_callback('⚠️ Trình duyệt đã bị đóng -> Dừng.')
+                    return (False, failed_total)
+                await page.reload()
+                await page.wait_for_timeout(5000)
+
+        if len(failed_total) == len(file_batch):
+            log_callback('❌ Thất bại toàn bộ batch Metadata.')
+            return (False, failed_total)
+        return (True, failed_total)
+    except Exception as e:
+        log_callback(f'❌ Lỗi ở handle_script_to_metadata_async: {e}')
+        return (False, file_batch)
+    finally:
+        try:
+            await page.close()
+        except:
+            pass

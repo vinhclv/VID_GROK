@@ -17,13 +17,18 @@ async def human_click(locator: Locator, page: Page, force: bool = False):
 async def human_type(locator: Locator, text: str, page: Page):
     """
     Mô phỏng gõ phím theo cụm (chunk) với tốc độ và nhịp thở của người thật.
+    Tự động lọc bỏ ký tự '@' nếu gặp phải để tránh nạp các menu popup autocomplete.
     """
+    clean_text = text.replace("@", "") if text else ""
+    if not clean_text:
+        return
+
     await human_click(locator, page)
     await page.wait_for_timeout(random.uniform(200, 400))
     idx = 0
-    while idx < len(text):
+    while idx < len(clean_text):
         chunk_size = random.randint(15, 30)
-        chunk = text[idx:idx + chunk_size]
+        chunk = clean_text[idx:idx + chunk_size]
         await locator.press_sequentially(chunk, delay=random.randint(5, 10))
         idx += chunk_size
         await page.wait_for_timeout(random.uniform(20, 50))

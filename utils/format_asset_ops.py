@@ -222,6 +222,10 @@ def scan_project(root: str) -> dict:
     thc = root_path / "tong_hop_character"
     info["has_tong_hop"] = thc.exists() and (thc / "tong_hop_character.json").exists()
 
+    # tong_hop_thumbnail
+    tht = root_path / "tong_hop_thumbnail"
+    info["has_tong_hop_thumb"] = tht.exists() and (tht / "all_thumbnails.json").exists()
+
     # output_image count
     oi = thc / "output_image" if thc.exists() else None
     if oi and oi.exists():
@@ -250,7 +254,8 @@ def phase1_split_and_build(root: str, log) -> bool:
     1. Tách Script_raw theo XML tags → thư mục thành phần
     2. Clean & format JSON
     3. Gộp character_json → tong_hop_character.json
-    4. Tạo NONEIMG.jpg
+    4. Gộp thumbnail_json → tong_hop_thumbnail/all_thumbnails.json
+    5. Tạo NONEIMG.jpg
     """
     root_path = Path(root)
     script_raw = root_path / "Script_raw"
@@ -332,16 +337,13 @@ def phase1_split_and_build(root: str, log) -> bool:
                     char_name = str(item.get("character", ""))
 
                     if not stt.startswith(vid_id):
-                        # STT dạng "1" hoặc "MC01" → thêm prefix "0004_"
                         if char_name and char_name != "NONEIMG":
                             new_stt = f"{vid_id}_{char_name}"
                         else:
                             new_stt = f"{vid_id}_{stt}"
                         item["STT"] = new_stt
 
-                    # Set character = NONEIMG cho mode tạo ảnh tham chiếu
                     item["character"] = "NONEIMG"
-
                     merged.append(item)
 
             except Exception as e:
@@ -364,7 +366,80 @@ def phase1_split_and_build(root: str, log) -> bool:
         else:
             log("  ⚠️ Không tìm thấy dữ liệu character_json hợp lệ.", "WARNING")
 
-    log("✨ PHA 1 HOÀN THÀNH — Sẵn sàng import tong_hop_character/ để tạo ảnh tham chiếu.", "SUCCESS")
+    # ── Bước 4: Gộp prompt Thumbnail → tong_hop_thumbnail ──
+    log("━━━ BƯỚC 3: GỘP THUMBNAIL → TONG_HOP_THUMBNAIL ━━━", "INFO")
+    merged_thumbs = []
+    seen_ids = set()
+
+    # Chỉ quét duy nhất từ 0001_input/ và các thư mục con chứa file *_thumb.json
+    search_dirs = [
+        root_path / "0001_input",
+        root_path,
+    ]
+
+    for s_dir in search_dirs:
+        if not s_dir.exists():
+            continue
+        try:
+            found_files = sorted(s_dir.rglob("*_thumb.json"))
+        except Exception:
+            found_files = []
+
+        for tf in found_files:
+            # Bỏ qua nếu là file trong tong_hop_thumbnail
+            if "tong_hop_thumbnail" in tf.parts:
+                continue
+
+            vid_id = _extract_4digit_id(tf.name)
+            if not vid_id or vid_id in seen_ids:
+                continue
+
+            try:
+                raw = tf.read_text(encoding="utf-8")
+                items = _parse_json_flexible(raw)
+                if items:
+                    for item in items:
+                        if isinstance(item, dict):
+                            item["STT"] = f"{vid_id}_thumb"
+                            merged_thumbs.append(item)
+                            seen_ids.add(vid_id)
+                            log(f"  📄 Tìm thấy {tf.name} (ID: {vid_id})", "INFO")
+                            break
+            except Exception as e:
+                log(f"  ⚠️ Lỗi parse {tf.name}: {e}", "WARNING")
+
+    if merged_thumbs:
+        tht_dir = root_path / "tong_hop_thumbnail"
+        tht_dir.mkdir(exist_ok=True)
+        (tht_dir / "output_image").mkdir(exist_ok=True)
+        (tht_dir / "character").mkdir(exist_ok=True)
+        _ensure_noneimg(tht_dir / "character")
+
+        out_json = tht_dir / "all_thumbnails.json"
+        out_json.write_text(
+            json.dumps(merged_thumbs, indent=2, ensure_ascii=False),
+            encoding="utf-8"
+        )
+        log(f"  ✅ Gộp {len(merged_thumbs)} prompt Thumbnail từ 0001_input/thư mục con → tong_hop_thumbnail/all_thumbnails.json", "SUCCESS")
+        log("  ✅ Tạo thư mục character/ và NONEIMG.jpg cho tong_hop_thumbnail", "SUCCESS")
+    else:
+        log("  ⚠️ Không tìm thấy file *_thumb.json nào trong 0001_input/ hoặc thư mục con.", "WARNING")
+
+    if merged_thumbs:
+        tht_dir = root_path / "tong_hop_thumbnail"
+        tht_dir.mkdir(exist_ok=True)
+        (tht_dir / "output_image").mkdir(exist_ok=True)
+
+        out_json = tht_dir / "all_thumbnails.json"
+        out_json.write_text(
+            json.dumps(merged_thumbs, indent=2, ensure_ascii=False),
+            encoding="utf-8"
+        )
+        log(f"  ✅ Gộp {len(merged_thumbs)} prompt Thumbnail → tong_hop_thumbnail/all_thumbnails.json", "SUCCESS")
+    else:
+        log("  ⚠️ Không tìm thấy prompt Thumbnail trong các dự án.", "WARNING")
+
+    log("✨ PHA 1 HOÀN THÀNH — Sẵn sàng import tong_hop_character/ & tong_hop_thumbnail/ để tạo ảnh!", "SUCCESS")
     return True
 
 
@@ -376,21 +451,22 @@ def phase2_distribute_and_deploy(root: str, log) -> bool:
     """
     Gộp Pha 2 & 3:
     1. Đọc tong_hop_character/output_image/ → copy & rename về 0001_input/{ID}/character/
-    2. Copy storyboard_json → 0001_input/{ID}/
-    3. Copy tài nguyên phụ → 0001_input/{ID}/_resources/
+    2. Đọc tong_hop_thumbnail/output_image/ (hoặc tong_hop_thumbnail/) → copy về 0001_input/{ID}/{ID}_thumb.jpg
+    3. Copy storyboard_json → 0001_input/{ID}/
+    4. Copy tài nguyên phụ → 0001_input/{ID}/_resources/
     """
     root_path = Path(root)
     input_dir = root_path / "0001_input"
     input_dir.mkdir(exist_ok=True)
 
-    # --- 1. Phân phối ảnh tham chiếu ---
-    log("━━━ BƯỚC 1: PHÂN PHỐI ẢNH THAM CHIẾU ━━━", "INFO")
+    # --- 1. Phân phối ảnh nhân vật tham chiếu ---
+    log("━━━ BƯỚC 1: PHÂN PHỐI ẢNH THAM CHIẾU NHÂN VẬT ━━━", "INFO")
     output_img = root_path / "tong_hop_character" / "output_image"
     img_count = 0
     id_img_stats = {}
 
     if not output_img.exists():
-        log("  ⚠️ Chưa thấy tong_hop_character/output_image/ — bỏ qua copy ảnh.", "WARNING")
+        log("  ⚠️ Chưa thấy tong_hop_character/output_image/ — bỏ qua copy ảnh nhân vật.", "WARNING")
     else:
         img_files = [
             f for f in output_img.iterdir()
@@ -398,7 +474,7 @@ def phase2_distribute_and_deploy(root: str, log) -> bool:
             and f.name != "Thumbs.db"
         ]
         if not img_files:
-            log("  ⚠️ output_image/ trống — chưa có ảnh tham chiếu.", "WARNING")
+            log("  ⚠️ tong_hop_character/output_image/ trống — chưa có ảnh nhân vật.", "WARNING")
         else:
             for img in sorted(img_files):
                 vid_id = _extract_4digit_id(img.name)
@@ -417,10 +493,42 @@ def phase2_distribute_and_deploy(root: str, log) -> bool:
                 img_count += 1
 
             for vid_id, cnt in sorted(id_img_stats.items()):
-                log(f"  ✅ ID {vid_id}: {cnt} ảnh → character/", "SUCCESS")
+                log(f"  ✅ ID {vid_id}: {cnt} ảnh nhân vật → character/", "SUCCESS")
 
-    # --- 2. Deploy Storyboard & Tài nguyên phụ ---
-    log("━━━ BƯỚC 2: DEPLOY STORYBOARD & TÀI NGUYÊN ━━━", "INFO")
+    # --- 2. Phân phối ảnh Thumbnail ({ID}_thumb.jpg) ---
+    log("━━━ BƯỚC 2: PHÂN PHỐI ẢNH THUMBNAIL ━━━", "INFO")
+    tht_img_dir = root_path / "tong_hop_thumbnail" / "output_image"
+    if not tht_img_dir.exists():
+        tht_img_dir = root_path / "tong_hop_thumbnail"
+
+    if tht_img_dir.exists():
+        thumb_files = [
+            f for f in tht_img_dir.iterdir()
+            if f.is_file() and f.suffix.lower() in (".jpg", ".png", ".jpeg")
+            and f.name != "Thumbs.db"
+        ]
+        thumb_cnt = 0
+        for t_img in sorted(thumb_files):
+            vid_id = _extract_4digit_id(t_img.name)
+            if not vid_id:
+                continue
+
+            target_folder = input_dir / vid_id
+            target_folder.mkdir(parents=True, exist_ok=True)
+
+            ext = t_img.suffix.lower()
+            dst_path = target_folder / f"{vid_id}_thumb{ext}"
+            shutil.copy2(t_img, dst_path)
+            log(f"  ✅ ID {vid_id}: Phân phối {t_img.name} → {vid_id}_thumb{ext}", "SUCCESS")
+            thumb_cnt += 1
+
+        if thumb_cnt == 0:
+            log("  ⚠️ Chưa có ảnh Thumbnail trong tong_hop_thumbnail/", "WARNING")
+    else:
+        log("  ⚠️ Chưa tạo tong_hop_thumbnail/ — bỏ qua phân phối thumbnail.", "WARNING")
+
+    # --- 3. Deploy Storyboard & Tài nguyên phụ ---
+    log("━━━ BƯỚC 3: DEPLOY STORYBOARD & TÀI NGUYÊN ━━━", "INFO")
     MAIN_JSON = "storyboard_json"
     EXTRA_SOURCES = {k: v for k, v in DEPLOY_SOURCES.items() if k != MAIN_JSON}
 

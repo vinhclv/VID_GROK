@@ -15,7 +15,7 @@ def validate_timecodes(json_path: str) -> tuple[bool, str]:
 
     Returns:
         (True, "")              — Tất cả hợp lệ
-        (False, message)        — Có STT sai, message chứa danh sách lỗi để hiển thị popup
+        (False, message)        — Có STT sai hoặc lỗi định dạng JSON
     """
     try:
         with open(json_path, encoding="utf-8") as f:
@@ -23,8 +23,14 @@ def validate_timecodes(json_path: str) -> tuple[bool, str]:
     except Exception as e:
         return False, f"Không đọc được file JSON:\n{os.path.basename(json_path)}\n{e}"
 
+    if not isinstance(items, list):
+        return False, f"JSON không đúng dạng list [...] kịch bản (File: {os.path.basename(json_path)})"
+
     bad_stts = []
-    for item in items:
+    for idx, item in enumerate(items, 1):
+        if not isinstance(item, dict):
+            bad_stts.append(f"  Mục số {idx} không phải đối tượng {{...}}")
+            continue
         tc = item.get("timecode", "").strip()
         if tc and not _TC_PATTERN.match(tc):
             bad_stts.append(f"  STT {item.get('STT', '?')}: '{tc}'")
@@ -49,7 +55,7 @@ def validate_characters(json_path: str, img_dir: str) -> tuple[bool, str, list[s
 
     Returns:
         (True, "", [])                       - Tất cả hợp lệ
-        (False, detail_message, bad_stts)    - Thiếu ảnh nhân vật
+        (False, detail_message, bad_stts)    - Thiếu ảnh nhân vật hoặc lỗi định dạng JSON
     """
     try:
         with open(json_path, encoding="utf-8") as f:
@@ -57,12 +63,17 @@ def validate_characters(json_path: str, img_dir: str) -> tuple[bool, str, list[s
     except Exception as e:
         return False, f"Không đọc được file JSON:\n{os.path.basename(json_path)}\n{e}", []
 
+    if not isinstance(items, list):
+        return False, f"JSON không đúng dạng list [...] kịch bản (File: {os.path.basename(json_path)})", []
+
     bad_stts = []
     missing_chars = set()
     
     for item in items:
+        if not isinstance(item, dict):
+            continue
         stt = str(item.get("STT", "?")).strip()
-        characters_str = item.get("character", "").strip()
+        characters_str = str(item.get("character", "")).strip()
         
         if characters_str and characters_str != "0":
             chars = [c.strip() for c in characters_str.split(',')]

@@ -50,6 +50,16 @@ IMPORT_MODES = {
         "need_gem":          False,
         "validate_timecode": True,   # Kiểm tra timecode trong JSON khi quét
     },
+    "ScriptRaw ➡ Metadata": {
+        "required_subdirs":  [],
+        "input2_folder":     "",
+        "output_folder":     "",
+        "auto_create_out":   True,
+        "badges":            ["📄 Script_raw/*.txt ➡ metadata.json"],
+        "loop_type":         "script_metadata",
+        "need_gem":          True,
+        "validate_timecode": False,
+    },
 }
 
 
@@ -266,22 +276,21 @@ class ImportProjectTab(ttk.Frame):
 
     def _scan_root(self):
         root_path = self.entry_root.get().strip()
-        if not root_path or not os.path.isdir(root_path):
-            messagebox.showwarning("Thiếu đường dẫn",
-                                   "Vui lòng chọn thư mục gốc hợp lệ!")
-            return
-
-        dialog = SuffixDialog(
-            self,
-            "Chọn hậu tố JSON",
-            "Chọn hoặc nhập hậu tố của file JSON cần quét:"
-        )
-        suffix = dialog.result
-        if suffix is None:
-            return
-        suffix = suffix.strip()
-
         cfg = IMPORT_MODES[self.selected_mode.get()]
+        suffix = ""
+
+        # Không hiện Popup chọn hậu tố JSON nếu là mode ScriptRaw ➡ Metadata hoặc Thumbnail ➡ Image
+        if cfg.get("loop_type") not in ["script_metadata", "thumbnail_image"]:
+            dialog = SuffixDialog(
+                self,
+                "Chọn hậu tố JSON",
+                "Chọn hoặc nhập hậu tố của file JSON cần quét:"
+            )
+            suffix = dialog.result
+            if suffix is None:
+                return
+            suffix = suffix.strip()
+
         self._clear_list()
         self.lbl_status.config(text="⏳ Đang quét...", foreground="#ffb86c")
         self.update_idletasks()
@@ -359,6 +368,54 @@ class ImportProjectTab(ttk.Frame):
         Trả về {folder_name: {"json": path, "subdirs": {name: path}}}
         """
         result = {}
+
+        # Xử lý riêng cho mode ScriptRaw ➡ Metadata
+        if cfg.get("loop_type") == "script_metadata":
+            import re
+            from utils.pre_upload_ops import extract_4digit_id
+            from utils.file_ops import get_script_metadata_status
+
+            script_raw_dir = root_path
+            if os.path.isdir(os.path.join(root_path, "Script_raw")):
+                script_raw_dir = os.path.join(root_path, "Script_raw")
+
+            if os.path.exists(script_raw_dir) and os.path.isdir(script_raw_dir):
+                try:
+                    entries = sorted(os.listdir(script_raw_dir))
+                except Exception:
+                    entries = []
+
+                for txt_f in entries:
+                    if not txt_f.lower().endswith(".txt"):
+                        continue
+                    vid_id = extract_4digit_id(txt_f) or os.path.splitext(txt_f)[0]
+                    txt_path = os.path.join(script_raw_dir, txt_f)
+
+                    base_dir = os.path.dirname(script_raw_dir) if os.path.basename(script_raw_dir) == "Script_raw" else root_path
+                    if os.path.exists(os.path.join(base_dir, "0001_input")):
+                        out_dir = os.path.join(base_dir, "0001_input", vid_id)
+                    else:
+                        out_dir = os.path.join(base_dir, vid_id)
+
+                    pending_tasks, completed_tasks = get_script_metadata_status(txt_path, out_dir)
+                    result[vid_id] = {
+                        "json": txt_path,
+                        "subdirs": {},
+                        "root": out_dir,
+                        "out": out_dir,
+                        "tc_ok": True,
+                        "tc_err": "",
+                        "tc_bad_stts": [],
+                        "char_ok": True,
+                        "char_err": "",
+                        "char_bad_stts": [],
+                        "pending": pending_tasks,
+                        "completed": completed_tasks,
+                    }
+            return result
+
+
+
         try:
             entries = sorted(
                 os.listdir(root_path),
@@ -579,7 +636,7 @@ class ImportProjectTab(ttk.Frame):
                 tk.Label(card, text=partial_txt, bg=bg,
                          fg="#ff9800", font=("Segoe UI", 8, "bold")).pack(side="left", padx=(0, 8))
         else:
-            # Hiển thị các lỗi (timecode hoặc thiếu ảnh nhân vật)
+            # Hiển thị các lỗi (timecode, thiếu ảnh nhân vật, hoặc sai cấu trúc JSON)
             warn_txts = []
             if not tc_ok:
                 bad_stts = data.get("tc_bad_stts", [])
@@ -588,7 +645,9 @@ class ImportProjectTab(ttk.Frame):
                     suffix   = f" (+{len(bad_stts)-4} nữa)" if len(bad_stts) > 4 else ""
                     warn_txts.append(f"⚠️ STT lỗi TC: {stts_str}{suffix}")
                 else:
-                    warn_txts.append("⚠️ Timecode sai định dạng")
+                    tc_err = data.get("tc_err", "")
+                    first_line = tc_err.splitlines()[0].strip() if tc_err else "⚠️ Timecode sai định dạng"
+                    warn_txts.append(f"⚠️ {first_line}")
                     
             if not char_ok:
                 char_bad_stts = data.get("char_bad_stts", [])
@@ -597,7 +656,12 @@ class ImportProjectTab(ttk.Frame):
                     suffix   = f" (+{len(char_bad_stts)-4} nữa)" if len(char_bad_stts) > 4 else ""
                     warn_txts.append(f"⚠️ Thiếu ảnh: {chars_str}{suffix}")
                 else:
-                    warn_txts.append("⚠️ Thiếu ảnh nhân vật")
+                    char_err = data.get("char_err", "")
+                    first_line = char_err.splitlines()[0].strip() if char_err else "⚠️ Thiếu ảnh nhân vật"
+                    if not tc_ok and first_line in " ".join(warn_txts):
+                        pass
+                    else:
+                        warn_txts.append(f"⚠️ {first_line}")
             
             warn_txt = " | ".join(warn_txts)
             tk.Label(card, text=warn_txt, bg=bg,
@@ -757,8 +821,8 @@ class ImportProjectTab(ttk.Frame):
             # input2: folder nguồn (character/ hoặc output/)
             inp2 = data["subdirs"].get(cfg["input2_folder"], "")
 
-            # output: folder đích (output/ hoặc final/)
-            out = os.path.join(data["root"], cfg["output_folder"])
+            # output: folder đích (output/ hoặc final/ hoặc data["out"])
+            out = data.get("out") or (os.path.join(data["root"], cfg["output_folder"]) if cfg["output_folder"] else data["root"])
 
             # Tạo output folder nếu mode yêu cầu
             if cfg["auto_create_out"] and out:

@@ -47,7 +47,8 @@ class DashboardTab(ttk.Frame):
         self.selected_mode = tk.StringVar(value="Image ➡ Prompt")
         self.cbo_mode = ttk.Combobox(self.frame_ctrl, textvariable=self.selected_mode, state="readonly", width=25)
         self.cbo_mode['values'] = (
-            "SRT ➡ Prompt", 
+            "SRT ➡ Prompt",
+            "ScriptRaw ➡ Metadata", 
             "Prompt ➡ Image", 
             "Image + Prompt ➡ Video",
             "Video ➡ Stretch (Timecode)",

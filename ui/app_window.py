@@ -12,6 +12,7 @@ from ui.dashboard_tab import DashboardTab
 from ui.settings_tab import SettingsTab       
 from ui.import_tab import ImportProjectTab    
 from ui.format_asset_tab import FormatAssetTab
+from ui.pre_upload_tab import PreUploadTab
 from engine.batch_processor import BatchProcessor 
 
 from utils.profile_state import ProfileStateManager
@@ -77,6 +78,10 @@ class BatchApp:
         self.tab_format_asset = FormatAssetTab(self.notebook, self)
         self.notebook.add(self.tab_format_asset, text="🛠️ Format Asset")
 
+        # TAB 6: Pre-Upload
+        self.tab_pre_upload = PreUploadTab(self.notebook, self)
+        self.notebook.add(self.tab_pre_upload, text="📤 Pre-Upload")
+
         # LOGS
         frame_log = ttk.LabelFrame(main_pane, text="📜 Nhật ký hoạt động", padding=10)
         main_pane.add(frame_log, weight=1)
@@ -123,6 +128,7 @@ class BatchApp:
         # Map Text sang Key Logic
         mode_map = {
             "SRT ➡ Prompt": "srt_prompt",
+            "ScriptRaw ➡ Metadata": "script_metadata",
             "Prompt ➡ Image": "prompt_image",
             "Image + Prompt ➡ Video": "1_image_prompt_video",
             "Video ➡ Stretch (Timecode)": "stretch_video",
