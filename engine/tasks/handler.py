@@ -208,7 +208,7 @@ async def handle_script_to_metadata_async(context, file_batch, assets_path, pref
         consecutive_errors = 0
         MAX_CONSECUTIVE_ERRORS = 3
 
-        for item in file_batch:
+        for i, item in enumerate(file_batch):
             vid_id = item.get('vid_id') or item.get('STT') or '0000'
             log_callback(f'📑 [Script ➡ Metadata] Đang tạo Metadata cho {vid_id}...')
             success = await process_script_to_metadata_async(page, item, log_callback)
@@ -216,6 +216,10 @@ async def handle_script_to_metadata_async(context, file_batch, assets_path, pref
                 if item in failed_total:
                     failed_total.remove(item)
                 consecutive_errors = 0
+                # Reset trang cho item tiếp theo (goto URL thay vì đóng profile)
+                if i < len(file_batch) - 1:
+                    await page.goto(url, timeout=60000)
+                    await page.wait_for_timeout(5000)
             else:
                 consecutive_errors += 1
                 log_callback(f'⚠️ Lỗi xử lý Metadata STT {vid_id} ({consecutive_errors}/{MAX_CONSECUTIVE_ERRORS})')
@@ -225,7 +229,8 @@ async def handle_script_to_metadata_async(context, file_batch, assets_path, pref
                 if page.is_closed():
                     log_callback('⚠️ Trình duyệt đã bị đóng -> Dừng.')
                     return (False, failed_total)
-                await page.reload()
+                # Goto URL thay vì reload (reset hoàn toàn Gem state)
+                await page.goto(url, timeout=60000)
                 await page.wait_for_timeout(5000)
 
         if len(failed_total) == len(file_batch):

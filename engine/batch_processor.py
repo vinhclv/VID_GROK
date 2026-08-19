@@ -30,6 +30,7 @@ class BatchProcessor:
         self.stt_skipped   = []    # STT bỏ qua vĩnh viễn trong dự án hiện tại
         
         self.current_monitoring_info = None 
+        self._metadata_projects = None  # (project_queue, runnable_indices, loop_type) — cho monitor track metadata
 
     def clear_task_queue(self):
         with self.task_queue.mutex:
@@ -51,6 +52,13 @@ class BatchProcessor:
             ProfileStateManager().set_rate_limit_count(p, 0)
         
         self.log(f"🚀 BẮT ĐẦU CHẠY: {len(project_queue)} DỰ ÁN", "INFO")
+
+        # === CHẾ ĐỘ ĐẶC BIỆT: Metadata — Gom batch, giữ profile mở ===
+        if loop_type == "script_metadata":
+            self._run_metadata_batch(project_queue, loop_type, profiles)
+            self.current_monitoring_info = None
+            finished_callback()
+            return
 
         for idx, project in enumerate(project_queue):
             if self.stop_event.is_set(): break
@@ -206,6 +214,151 @@ class BatchProcessor:
 
         return True
 
+    def _run_metadata_batch(self, project_queue, loop_type, profiles):
+        """
+        Chế độ đặc biệt cho ScriptRaw ➡ Metadata:
+        Gom tất cả file .txt vào 1 batch, mở profile 1 lần duy nhất,
+        xử lý tuần tự với page.goto(url) giữa các file thay vì đóng/mở lại profile.
+        """
+        # 1. Gom tất cả pending items từ tất cả dự án
+        all_pending = []
+        runnable_indices = []
+        url = ""
+        prompt = ""
+
+        for idx, project in enumerate(project_queue):
+            if self.stop_event.is_set():
+                break
+            if project.get("status", "Waiting") in ["Failed ❌", "Skipped ⏭️"]:
+                continue
+            self.update_status(idx, "Running ⏳")
+            runnable_indices.append(idx)
+
+            pending, _ = get_task_status(loop_type, project["input"], project.get("input2", ""), project["output"])
+            all_pending.extend(pending)
+
+            if not url:
+                url = project["url"]
+                prompt = project.get("prompt", "")
+
+        if not all_pending:
+            for idx in runnable_indices:
+                self.update_status(idx, "Done ✅")
+            self.log("✅ Tất cả metadata đã hoàn thành!", "SUCCESS")
+            return
+
+        # 2. Lọc profile khỏe mạnh
+        active_profiles = []
+        for p in profiles:
+            if self.profile_health.get(p, 0) >= config.global_settings["system"]["max_retries"]:
+                continue
+            p_state = ProfileStateManager().get_state(p)
+            status = p_state.get("status", "idle")
+            if status in ["error", "killed", "failed"]:
+                continue
+            active_profiles.append(p)
+
+        if not active_profiles:
+            self.log("❌ Không còn profile nào khỏe mạnh!", "ERROR")
+            for idx in runnable_indices:
+                self.update_status(idx, "Failed ❌")
+            return
+
+        profile_name = active_profiles[0]
+
+        # 3. Checkout profile
+        if not ProfileStateManager().checkout(profile_name, "in_batch"):
+            self.log(f"⚠️ [{profile_name}] Profile đang bận.", "WARNING")
+            for idx in runnable_indices:
+                self.update_status(idx, "Failed ❌")
+            return
+
+        # Bật monitoring cho metadata (cho progress counter real-time)
+        self._metadata_projects = (project_queue, runnable_indices, loop_type)
+
+        try:
+            self.log(f"▶️ [{profile_name}] Nhận {len(all_pending)} metadata tasks (1 session)...", "INFO")
+
+            # 4. Chạy worker trong thread riêng để có thể cập nhật trạng thái real-time
+            worker_result = [True, []]  # [is_healthy, failed_items]
+            def _worker_fn():
+                worker_result[0], worker_result[1] = run_worker_task(
+                    profile_name, all_pending, loop_type, "", prompt, url,
+                    DEFAULT_PROFILES, self.stop_event, self.log
+                )
+
+            worker_thread = threading.Thread(target=_worker_fn, daemon=True)
+            worker_thread.start()
+
+            # Theo dõi real-time: poll filesystem mỗi 3 giây để cập nhật status từng dự án
+            while worker_thread.is_alive():
+                if self.stop_event.is_set():
+                    break
+                for idx in runnable_indices:
+                    project = project_queue[idx]
+                    if project.get("status") == "Running ⏳":
+                        p, _ = get_task_status(loop_type, project["input"], project.get("input2", ""), project["output"])
+                        if not p:
+                            self.update_status(idx, "Done ✅")
+                            self.log(f"✅ Dự án {os.path.basename(project['input'])} hoàn thành!", "SUCCESS")
+                time.sleep(3)
+
+            worker_thread.join()
+            is_healthy, failed_items = worker_result
+
+            # 5. Retry failed items (mỗi lần retry mở 1 session mới)
+            MAX_STT_FAILS = config.global_settings.get("system", {}).get("max_stt_retries", 5)
+            retry_round = 0
+            while failed_items and retry_round < MAX_STT_FAILS and not self.stop_event.is_set():
+                retry_round += 1
+                self.log(f"♻️ [{profile_name}] Retry {len(failed_items)} metadata items (lần {retry_round}/{MAX_STT_FAILS})...", "WARNING")
+
+                # Retry cũng chạy trong thread riêng để tiếp tục poll status
+                retry_result = [True, []]
+                def _retry_fn(fr=failed_items):
+                    retry_result[0], retry_result[1] = run_worker_task(
+                        profile_name, fr, loop_type, "", prompt, url,
+                        DEFAULT_PROFILES, self.stop_event, self.log
+                    )
+
+                rt = threading.Thread(target=_retry_fn, daemon=True)
+                rt.start()
+                while rt.is_alive():
+                    if self.stop_event.is_set():
+                        break
+                    for idx in runnable_indices:
+                        project = project_queue[idx]
+                        if project.get("status") == "Running ⏳":
+                            p, _ = get_task_status(loop_type, project["input"], project.get("input2", ""), project["output"])
+                            if not p:
+                                self.update_status(idx, "Done ✅")
+                                self.log(f"✅ Dự án {os.path.basename(project['input'])} hoàn thành!", "SUCCESS")
+                    time.sleep(3)
+                rt.join()
+                is_healthy, failed_items = retry_result
+
+            if not is_healthy:
+                self.profile_health[profile_name] = self.profile_health.get(profile_name, 0) + 1
+            else:
+                self.profile_health[profile_name] = 0
+
+        finally:
+            self._metadata_projects = None
+            current_state = ProfileStateManager().get_state(profile_name)
+            if current_state.get("status") in ["in_batch"]:
+                ProfileStateManager().release(profile_name)
+
+        # 6. Cập nhật trạng thái cuối cùng cho các dự án chưa được đánh dấu Done
+        for idx in runnable_indices:
+            project = project_queue[idx]
+            if project.get("status") == "Running ⏳":
+                pending, _ = get_task_status(loop_type, project["input"], project.get("input2", ""), project["output"])
+                if not pending:
+                    self.update_status(idx, "Done ✅")
+                    self.log(f"✅ Dự án {os.path.basename(project['input'])} hoàn thành!", "SUCCESS")
+                else:
+                    self.update_status(idx, "Failed ❌")
+
     def continuous_profile_runner(self, profile_name, loop_type, inp_path, inp2_path, out_path, prompt, url, languages, shuffle_gems):
         # Checkout chiếm dụng profile trước khi bắt đầu chạy luồng
         if not ProfileStateManager().checkout(profile_name, "in_batch"):
@@ -307,7 +460,19 @@ class BatchProcessor:
         last_info = None   # cache để dùng cho final scan
 
         while not self.stop_event.is_set():
-            if self.current_monitoring_info:
+            # === Metadata batch monitoring: gom tiến độ từ tất cả dự án ===
+            if self._metadata_projects:
+                try:
+                    pq, indices, lt = self._metadata_projects
+                    total_p, total_c = 0, 0
+                    for idx in indices:
+                        p, c = get_task_status(lt, pq[idx]["input"], pq[idx].get("input2", ""), pq[idx]["output"])
+                        total_p += len(p)
+                        total_c += len(c)
+                    update_ui_callback(total_p + total_c, total_p, total_c)
+                except Exception as e:
+                    print(f"Monitor Metadata Error: {e}")
+            elif self.current_monitoring_info:
                 last_info = self.current_monitoring_info   # ← luôn giữ bản mới nhất
                 try:
                     inp, inp2, out, loop_type, languages, shuffle_gems = last_info

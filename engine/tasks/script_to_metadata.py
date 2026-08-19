@@ -41,11 +41,11 @@ async def process_script_to_metadata_async(page: Page, item: dict, log_callback=
         log_callback(f"📎 Đang đính kèm file kịch bản {os.path.basename(script_path)} lên Gemini Gem AI...")
         
         file_uploaded = False
-        file_input = page.locator("input[type='file']").first
+        file_inputs = page.locator("input[type='file']")
 
-        if await file_input.count() > 0:
+        if await file_inputs.count() > 0:
             try:
-                await file_input.set_input_files(script_path)
+                await file_inputs.first.set_input_files(script_path)
                 await page.wait_for_timeout(3000) # Đợi chip file xuất hiện trong khung Gemini
                 file_uploaded = True
                 log_callback(f"✅ Đã đính kèm tệp {os.path.basename(script_path)} thành công!")
@@ -63,9 +63,10 @@ async def process_script_to_metadata_async(page: Page, item: dict, log_callback=
 
         # --- 2. BẤM GỬI TIN NHẮN ---
         btn_send = page.locator("button[aria-label*='Send'], button[aria-label*='Gửi'], form div.absolute.right-2 button, form button[type='submit'], button.send-button").last
-        if await btn_send.is_visible(timeout=3000):
+        try:
+            await btn_send.wait_for(state='visible', timeout=3000)
             await human_click(btn_send, page)
-        else:
+        except Exception:
             textbox = page.locator("form textarea, form [contenteditable='true'], [role='textbox']").first
             await textbox.press("Enter")
 
@@ -73,8 +74,8 @@ async def process_script_to_metadata_async(page: Page, item: dict, log_callback=
         log_callback("⏳ Đang chờ Gemini AI sinh Metadata & Thumbnail JSON...")
         RESPONSE_SELECTOR = "div.markdown-main-panel[id^='model-response-message-content'], div.message-content, [role='log'] div.prose, div.markdown"
         
-        await page.locator(RESPONSE_SELECTOR).last.wait_for(state='visible', timeout=30000)
-        last_response_el = page.locator(RESPONSE_SELECTOR).last
+        resp_locator = page.locator(RESPONSE_SELECTOR).last
+        await resp_locator.wait_for(state='visible', timeout=30000)
 
         last_len = -1
         start_wait = time.time()
@@ -82,20 +83,21 @@ async def process_script_to_metadata_async(page: Page, item: dict, log_callback=
 
         while time.time() - start_wait < wait_limit:
             try:
-                curr_text = await last_response_el.inner_text()
+                curr_text = await resp_locator.inner_text()
                 curr_len = len(curr_text.strip())
                 if curr_len == last_len and curr_len > 0:
                     break
                 last_len = curr_len
-            except:
-                pass
+            except Exception as e_poll:
+                log_callback(f"⚠️ Polling response lỗi: {e_poll}")
+                resp_locator = page.locator(RESPONSE_SELECTOR).last
             await page.wait_for_timeout(2000)
 
-        # --- 3. TRÍCH XUẤT CODE BLOCK MARAKDOWN JSON ---
-        full_response_text = await last_response_el.inner_text()
+        # --- 3. TRÍCH XUẤT CODE BLOCK MARKDOWN JSON ---
+        full_response_text = await resp_locator.inner_text()
         
         # Thử tìm Code Block ````json ... ```` trước
-        code_elements = last_response_el.locator("pre code, code")
+        code_elements = resp_locator.locator("pre code, code")
         code_count = await code_elements.count()
         
         json_payload_text = ""
